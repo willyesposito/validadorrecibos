@@ -1,0 +1,28 @@
+# ───────────────────────────────────────────────────────────────────
+# DATOS REALES DE PAYROLL — NUNCA subir al repo (privacidad / GitHub Pages)
+# La herramienta procesa todo en el navegador; ningún dato real vive en el repo.
+# ───────────────────────────────────────────────────────────────────
+Archivos/
+data/*.pdf
+data/*.xlsx
+data/*.xls
+data/*.csv
+data/*.json
+data/*.html
+**/*.pdf
+**/*.xlsx
+**/*.xls
+# Excepción: librerías vendoreadas y assets del sitio sí se versionan
+!docs/vendor/**
+
+# Python
+__pycache__/
+*.pyc
+
+# Node / build local
+node_modules/
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
