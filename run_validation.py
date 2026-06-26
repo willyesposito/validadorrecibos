@@ -7,10 +7,7 @@ Uso:
         --liqui  "data/01-Preliquidacion mensual 06-2026 V2.pdf" \\
         --recibos data/recibo_contrib_v4.pdf data/recibo_contrib_v4_rrhh.pdf \\
         [--output data/reporte.json] \\
-        [--verbose]
-
-    # Modo diagnóstico (calibrar columnas de la liquidación):
-    python run_validation.py --diagnostico --liqui LIQUI.pdf [--pagina 2]
+        [--verbose] [--solo-errores]
 """
 import argparse
 import json
@@ -19,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.parser_liquidacion import parse_liquidacion, calibrate_columns
+from src.parser_liquidacion import parse_liquidacion
 from src.parser_recibos import parse_recibos
 from src.validador import validar, print_reporte_consola
 
@@ -37,23 +34,10 @@ def main() -> None:
                         help='Archivo JSON de salida (opcional, por defecto stdout)')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Mostrar progreso detallado')
-    parser.add_argument('--diagnostico', action='store_true',
-                        help='Modo diagnóstico: muestra coordenadas de palabras '
-                             'en la liquidación para calibrar columnas')
-    parser.add_argument('--pagina', type=int, default=1,
-                        help='Página a usar en modo --diagnostico (default: 1)')
     parser.add_argument('--solo-errores', action='store_true',
                         help='En la salida JSON incluir solo empleados con hallazgos')
 
     args = parser.parse_args()
-
-    # --- Diagnostic mode ---
-    if args.diagnostico:
-        if not args.liqui:
-            print('Error: --diagnostico requiere --liqui', file=sys.stderr)
-            sys.exit(1)
-        calibrate_columns(args.liqui, page_num=args.pagina)
-        return
 
     # --- Validation mode ---
     if not args.liqui or not args.recibos:
