@@ -45,7 +45,7 @@ def main() -> None:
         sys.exit(1)
 
     print(f'Parseando liquidación: {args.liqui}')
-    liquidaciones = parse_liquidacion(args.liqui, verbose=args.verbose)
+    liquidaciones = parse_liquidacion([args.liqui], verbose=args.verbose)
     print(f'  → {len(liquidaciones)} empleados')
 
     print(f'Parseando recibos: {args.recibos}')
