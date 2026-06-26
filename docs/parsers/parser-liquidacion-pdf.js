@@ -1,5 +1,6 @@
 // parser-liquidacion-pdf.js
-// Parser de PDFs de pre-liquidación Marval (CONTROL DE LIQUIDACIÓN).
+// Parser de PDFs de pre-liquidación del ERP Meta 4 (reporte "CONTROL DE LIQUIDACIÓN").
+// Sirve para cualquier cliente liquidado con Meta 4 (no es específico de un cliente).
 //
 // Traducción fiel 1:1 del Python src/parser_liquidacion.py.
 // Parser basado en líneas de texto — no necesita detección de coordenadas.
@@ -140,7 +141,10 @@ function _parseText(text, results, currentHolder) {
     }
 
     // --- Saltar filas de encabezado ---
-    if (line.startsWith('CONCEPTO') || line.startsWith('Marval')
+    // El banner del reporte Meta 4 es "<Empresa> SUELDOS Y JORNALES": el nombre de la empresa
+    // varía por cliente, pero el rótulo "SUELDOS Y JORNALES" es del formato Meta 4 y es estable.
+    // Por eso skipeamos por el rótulo, no por el nombre del cliente (antes estaba hardcodeado).
+    if (line.startsWith('CONCEPTO') || line.includes('SUELDOS Y JORNALES')
         || line.startsWith('CONTROL') || line.startsWith('Mes y Año')
         || line.startsWith('Ingreso:')) {
       continue;
