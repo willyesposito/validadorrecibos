@@ -79,15 +79,20 @@ def _validar_empleado(
                 monto_liqui=c.monto,
             ))
         else:
-            if not _diff_ok(c.monto, rc.monto, TOLS_CONCEPTO):
-                diff = round(c.monto - rc.monto, 2)
+            # El recibo muestra los descuentos en negativo y la liquidación los
+            # lista como magnitud. La diferencia de signo es convención de
+            # presentación, no una diferencia de monto: comparamos por valor
+            # absoluto.
+            monto_recibo_abs = abs(rc.monto)
+            if not _diff_ok(c.monto, monto_recibo_abs, TOLS_CONCEPTO):
+                diff = round(c.monto - monto_recibo_abs, 2)
                 hallazgos.append(Hallazgo(
                     tipo='MONTO_DIFIERE',
                     mensaje=f'Código {c.codigo} ({c.descripcion}): '
-                            f'liquidación ${_fmt(c.monto)} ≠ recibo ${_fmt(rc.monto)} '
+                            f'liquidación ${_fmt(c.monto)} ≠ recibo ${_fmt(monto_recibo_abs)} '
                             f'(dif ${_fmt(diff)})',
                     codigo=c.codigo, descripcion=c.descripcion,
-                    monto_liqui=c.monto, monto_recibo=rc.monto, diferencia=diff,
+                    monto_liqui=c.monto, monto_recibo=monto_recibo_abs, diferencia=diff,
                 ))
 
     # --- 2. Verify totals ---

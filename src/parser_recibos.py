@@ -76,7 +76,9 @@ def _parse_page(text: str, page_num: int) -> Optional[ReciboEmpleado]:
             )
             if m:
                 rp.nombre = m.group(1).strip()
-                rp.legajo = m.group(2).strip()
+                # Normalizar legajo igual que la liquidación (sin ceros a la
+                # izquierda) para que '0826' (recibo) matchee '826' (liqui).
+                rp.legajo = (m.group(2).strip().lstrip('0') or '0')
                 state = 'PRE_CONTRIB'
                 continue
 
