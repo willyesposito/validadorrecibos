@@ -53,6 +53,18 @@ Branch = la rama actual, carpeta `/docs`.)
 
 El archivo `docs/.nojekyll` evita que GitHub procese el sitio con Jekyll.
 
+> **⚠️ PENDIENTE para dejar el sitio LIVE (estado al 2026-06-26):**
+> 1. **Mergear `claude/relaxed-cerf-6io2vw` → `main`.** Todo el código (motor JS verificado
+>    531/518/13, UI H&A, parsers, vendor) está en esa rama; `main` todavía es sólo el commit
+>    inicial. Hay un **PR abierto** para hacerlo en un click. *(El push directo a `main` lo
+>    bloquea el guardrail de auto-mode; se mergea por el PR, no por push directo.)*
+> 2. **Corregir la carpeta de Pages a `/docs`.** El usuario dejó Pages en Source=`main` ·
+>    carpeta **`/(root)`** — pero el `index.html` vive en `/docs`, así que con `/(root)` el
+>    sitio sale roto. Debe quedar **`main` · `/docs`**. (Se intentó corregir por la API de
+>    Pages; si no quedó aplicado, cambiarlo a mano en Settings → Pages.)
+>
+> Con esos dos pasos hechos, `https://willyesposito.github.io/validadorrecibos/` queda usable.
+
 **Regla de privacidad de datos:** los PDF/Excel reales **NUNCA** se versionan. El
 `.gitignore` excluye `Archivos/`, `data/*.pdf`, `**/*.xlsx`, etc. Sólo se versiona el
 código y las librerías de `docs/`.
