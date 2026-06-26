@@ -81,6 +81,8 @@ código y las librerías de `docs/`.
 ├── archivos anteriores/
 │   ├── chat anterior/             ← implementación original de Claude.ai (referencia)
 │   └── python-referencia/         ← motor Python original (genera la "referencia dorada")
+│       ├── src/                    ← parsers + validador Python (parser_recibos, models, …)
+│       └── comparar_versiones.py   ← utilidad: compara recibos v4 vs v6 legajo×legajo (usa src/)
 ├── .claude/launch.json            ← server local para previsualizar (python http.server)
 ├── CLAUDE.md  ·  README.md  ·  .gitignore
 ```
