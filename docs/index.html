@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Validador de Recibos · Hidalgo &amp; Asociados</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="hdr">
+  <div class="hdr-brand">
+    <div class="iso">H&amp;A</div>
+    <div class="wm">
+      <b>Hidalgo &amp; Asociados</b>
+      <span>Validador de Recibos de Haberes</span>
+    </div>
+  </div>
+  <div class="hdr-r">
+    <b>Payroll &amp; Administración de Personal</b>
+    Desde 1987 · 39 años
+  </div>
+</header>
+
+<main class="main">
+  <h1 class="page-title">Validador de Recibos vs Liquidación</h1>
+  <p class="page-sub">Cruza la liquidación de sueldos contra los recibos de haberes y detecta diferencias de conceptos, totales y gráfico de torta.</p>
+
+  <!-- Aviso de privacidad (adaptado: la herramienta procesa todo localmente) -->
+  <div class="privacy">
+    <span class="lock" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M6 10V8a6 6 0 1 1 12 0v2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="4" y="10" width="16" height="10" rx="2.5" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="15" r="1.6" fill="currentColor"/></svg>
+    </span>
+    <p><b>Privacidad:</b> esta herramienta procesa los archivos <b>100% en tu navegador</b>. Ningún recibo, liquidación ni dato de empleados se sube a internet ni a ningún servidor — todo el cálculo ocurre en tu equipo.</p>
+  </div>
+
+  <!-- Carga de archivos -->
+  <div class="section-label">1 · Cargá los archivos</div>
+  <div class="card uploader">
+    <div class="dropzones">
+      <label class="dz" id="dz-liqui">
+        <input type="file" id="in-liqui" accept=".pdf,.xlsx,.xls">
+        <div class="dz-ico">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M14 3v5h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M8.5 13.5h7M8.5 16.5h4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </div>
+        <div class="dz-title">Liquidación de sueldos</div>
+        <div class="dz-hint">PDF o Excel · arrastrá o hacé clic</div>
+        <div class="dz-files" id="files-liqui"></div>
+      </label>
+
+      <label class="dz" id="dz-recibos">
+        <input type="file" id="in-recibos" accept=".pdf" multiple>
+        <div class="dz-ico">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M13 3v5h5" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M9 13l2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="dz-title">Recibos de haberes</div>
+        <div class="dz-hint">PDF · uno o varios archivos</div>
+        <div class="dz-files" id="files-recibos"></div>
+      </label>
+    </div>
+
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-validar" disabled>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Validar
+      </button>
+      <button class="btn btn-ghost" id="btn-reset" style="display:none">Limpiar y empezar de nuevo</button>
+    </div>
+  </div>
+
+  <!-- Progreso -->
+  <div class="card progress" id="progress">
+    <div class="spinner"></div>
+    <div class="ptxt" id="ptxt">Procesando…</div>
+  </div>
+
+  <!-- Banner de error -->
+  <div class="errbanner" id="errbanner">
+    <span aria-hidden="true">⚠</span>
+    <div id="errtext"></div>
+  </div>
+
+  <!-- Resultados -->
+  <div class="results" id="results">
+    <div class="section-label">2 · Resultado de la validación</div>
+    <div class="cards" id="cards"></div>
+    <div class="toolbar">
+      <div class="filters" id="filters"></div>
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="6.5" cy="6.5" r="5" stroke="#1E3A5F" stroke-width="1.5"/><path d="M10.5 10.5L14 14" stroke="#1E3A5F" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input id="q" type="search" placeholder="Buscar nombre o legajo…">
+      </div>
+    </div>
+    <div class="tw">
+      <table id="tbl">
+        <thead><tr>
+          <th data-col="legajo">Legajo <span class="si">↕</span></th>
+          <th data-col="nombre">Nombre <span class="si">↕</span></th>
+          <th class="r" data-col="bruto">Bruto <span class="si">↕</span></th>
+          <th class="r" data-col="neto">Neto <span class="si">↕</span></th>
+          <th class="r" data-col="contrib">Contribuciones <span class="si">↕</span></th>
+          <th class="r" data-col="costo">Costo Laboral <span class="si">↕</span></th>
+          <th class="c" data-col="torta">Torta <span class="si">↕</span></th>
+          <th class="c" data-col="n_conceptos">Conc. <span class="si">↕</span></th>
+          <th class="c" data-col="resultado">Estado <span class="si">↕</span></th>
+          <th class="c"></th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty" id="empty" style="display:none"><strong>Sin resultados</strong>Probá ajustando el filtro o la búsqueda.</div>
+    </div>
+    <div class="results-foot">
+      <span id="footcount"></span>
+      <span>Tolerancia por concepto ±$0,01 · por total ±$1,00 · contribuciones por total</span>
+    </div>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="foot-top">
+    <div class="iso">H&amp;A</div>
+    <span>Hidalgo &amp; Asociados</span>
+  </div>
+  <div class="foot-grid">
+    <div><strong>Pacheco de Melo</strong><br>Pacheco de Melo 1833, Piso 6°<br>C1126AAA — C.A.B.A.</div>
+    <div><strong>Tucumán</strong><br>Tucumán 829, Piso 1° y 5°<br>C1049AAQ — C.A.B.A.</div>
+    <div><strong>Neuquén</strong><br>Fotheringham 478<br>Neuquén Capital</div>
+    <div><strong>Contacto</strong><br>info_ar@bhidalgo.com.ar<br>+54 11 2284 2031</div>
+  </div>
+  <div class="foot-legal">Hidalgo &amp; Asociados © 1987–2026 · Herramienta interna de validación · hidalgoyasociados.com.ar</div>
+</footer>
+
+<!-- Librerías vendoreadas (self-hosted, sin CDN en runtime) -->
+<script src="vendor/pdf.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

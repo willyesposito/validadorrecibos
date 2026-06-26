@@ -1,0 +1,7 @@
+{
+  "name": "validador-recibos-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Validador de recibos vs liquidación — 100% en el navegador (H&A)"
+}
