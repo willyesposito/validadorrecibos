@@ -5,6 +5,11 @@ Herramienta web que cruza una **liquidación de sueldos** (PDF o Excel) contra l
 diferencias de conceptos, totales, contribuciones y gráfico de torta.
 
 **Cliente original de los datos de prueba:** Marval & O'Farrell (junio 2026).
+**ERP de origen del formato:** **Meta 4**. Los parsers están calibrados al formato de
+reporte de Meta 4 (banner `"<Empresa> SUELDOS Y JORNALES"`, "CONTROL DE LIQUIDACIÓN"),
+**no** a un cliente puntual — sirve para cualquier cliente liquidado con Meta 4. El skip
+del banner se hace por el rótulo estable `SUELDOS Y JORNALES`, no por el nombre del cliente.
+Un cliente con **otro ERP** (otro formato de PDF) requeriría adaptar los parsers.
 **Desarrollado por:** Hidalgo & Asociados — Payroll, IT & Implementation.
 
 ---
@@ -121,6 +126,12 @@ la versión JS. La versión canónica es la de `docs/` (JavaScript).
   Contribuciones del recibo).
 - **Tolerancias:** ±$0,01 por concepto, ±$1,00 por total, ±1 punto para la suma de la torta.
 - **Empleados multi-bloque / multi-fecha:** se consolidan sumando.
+- **Multi-archivo (liquidación Y recibos):** ambos lados aceptan **varios archivos** y se
+  cruzan contra un conjunto **unificado** (consolidado por legajo). Sirve para anexos o
+  archivos confidenciales que se entregan aparte. Los PDF de liquidación se parsean juntos
+  (cada archivo = una "parte"); si un legajo aparece en más de un archivo, se consolida igual
+  que multi-bloque (conceptos concatenados, totales sumados — `mergeLiquiMaps` en `app.js`).
+  La liquidación puede mezclar PDF y Excel en el mismo lote.
 
 ---
 
@@ -160,3 +171,27 @@ python -m http.server 8123
 (O usar el preview de Claude Code: config en `.claude/launch.json`, server "validador".)
 
 NUNCA inventar ni asumir datos de empleados: todo dato del reporte sale de lo que se parsea.
+
+---
+
+## Automatizaciones de Claude Code (`.claude/`)
+
+El repo trae hooks, skills y un subagent. Config en `.claude/` (no se publica en Pages).
+
+**Hooks** (`.claude/settings.json` → `.claude/hooks/guard.mjs`, ya activos):
+- `PreToolUse/Bash`: **bloquea** versionar datos reales de payroll (`git add/commit/stash` de
+  `*.pdf/*.xlsx/*.csv/Archivos/`). Red de seguridad sobre el `.gitignore` (cubre `git add -f`).
+- `PreToolUse/Edit|Write`: **bloquea** editar a mano `docs/vendor/**` (libs vendoreadas).
+
+**Skills — Claude las ejecuta SOLO, sin que se las pidan, cuando es conveniente:**
+- `verify-golden`: **correr proactivamente** después de tocar cualquier parser
+  (`docs/parsers/*`) o `docs/core/validador.js`, y antes de mergear. Compara contra la
+  referencia dorada (531/518/13).
+- `deploy-check`: **correr proactivamente** antes de cualquier commit que vaya a `main` o de
+  proponer mergear el PR. Verifica que no haya datos reales versionados y que `/docs` esté apto.
+
+**Subagent** `business-rules-reviewer`: revisar diffs del motor contra las reglas de negocio
+de arriba (lanzarlo cuando se modifiquen parsers/validador).
+
+**MCP (manual, fuera del repo):** Playwright (`claude mcp add playwright -- npx -y @playwright/mcp@latest`)
+y context7 (`@upstash/context7-mcp`).

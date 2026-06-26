@@ -12,7 +12,10 @@ const pdfjsLib = window.pdfjsLib;
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 
 // ─────────────── Estado de archivos ───────────────
-const state = { liqui: null, recibos: [] };
+// liqui y recibos son ambos arrays: se admiten varios archivos por lado y se cruzan
+// contra un conjunto unificado (consolidado por legajo). Útil cuando hay anexos /
+// confidenciales que se agregan aparte y deben sumarse a la liquidación principal.
+const state = { liqui: [], recibos: [] };
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -26,13 +29,16 @@ const ui = {
 };
 
 function refreshButton() {
-  ui.btnValidar.disabled = !(state.liqui && state.recibos.length > 0);
+  ui.btnValidar.disabled = !(state.liqui.length > 0 && state.recibos.length > 0);
 }
 
-function setLiqui(file) {
-  state.liqui = file || null;
-  if (file) {
-    ui.filesLiqui.textContent = '✓ ' + file.name;
+function setLiqui(files) {
+  state.liqui = Array.from(files || []);
+  if (state.liqui.length) {
+    const names = state.liqui.map((f) => f.name);
+    ui.filesLiqui.textContent = state.liqui.length === 1
+      ? '✓ ' + names[0]
+      : `✓ ${state.liqui.length} archivos: ${names.join(', ')}`;
     ui.dzLiqui.classList.add('filled');
   } else {
     ui.filesLiqui.textContent = '';
@@ -73,13 +79,13 @@ function wireDropzone(dz, input, onFiles, multiple) {
     if (files && files.length) onFiles(multiple ? files : files[0]);
   });
 }
-wireDropzone(ui.dzLiqui, ui.inLiqui, setLiqui, false);
+wireDropzone(ui.dzLiqui, ui.inLiqui, setLiqui, true);
 wireDropzone(ui.dzRecibos, ui.inRecibos, setRecibos, true);
 
 ui.btnReset.addEventListener('click', () => {
-  state.liqui = null; state.recibos = [];
+  state.liqui = []; state.recibos = [];
   ui.inLiqui.value = ''; ui.inRecibos.value = '';
-  setLiqui(null); setRecibos([]);
+  setLiqui([]); setRecibos([]);
   ui.results.classList.remove('show');
   ui.errbanner.classList.remove('show');
   ui.btnReset.style.display = 'none';
@@ -98,23 +104,31 @@ ui.btnValidar.addEventListener('click', async () => {
   ui.results.classList.remove('show');
   ui.btnValidar.disabled = true;
   try {
-    // 1. Liquidación (PDF o Excel)
-    const lname = state.liqui.name.toLowerCase();
-    let liqui;
-    if (lname.endsWith('.xlsx') || lname.endsWith('.xls')) {
-      showProgress('Leyendo liquidación (Excel)…');
-      await yield_();
-      const buf = await state.liqui.arrayBuffer();
-      const wb = window.XLSX.read(new Uint8Array(buf), { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
-      liqui = parseLiquidacionXlsx(rows);
-    } else {
-      const buf = await state.liqui.arrayBuffer();
-      const pages = await extractPagesText(new Uint8Array(buf), pdfjsLib,
-        (n, t) => showProgress(`Leyendo liquidación (PDF)… página <b>${n}/${t}</b>`));
-      liqui = parseLiquidacionPdf([pages]);
+    // 1. Liquidación (uno o varios archivos; PDF y/o Excel, mezclables)
+    const liquiMaps = [];     // mapas {legajo: emp} parciales a fusionar
+    const pdfLiquiPages = []; // páginas de TODOS los PDF de liqui (van juntos al parser)
+    const nL = state.liqui.length;
+    for (let i = 0; i < nL; i++) {
+      const f = state.liqui[i];
+      const name = f.name.toLowerCase();
+      if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+        showProgress(`Leyendo liquidación (Excel ${i + 1}/${nL}: ${f.name})…`);
+        await yield_();
+        const buf = await f.arrayBuffer();
+        const wb = window.XLSX.read(new Uint8Array(buf), { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+        liquiMaps.push(parseLiquidacionXlsx(rows));
+      } else {
+        const buf = await f.arrayBuffer();
+        const pages = await extractPagesText(new Uint8Array(buf), pdfjsLib,
+          (n, t) => showProgress(`Leyendo liquidación (PDF ${i + 1}/${nL}: ${f.name})… página <b>${n}/${t}</b>`));
+        pdfLiquiPages.push(pages);
+      }
     }
+    // Todos los PDF se parsean juntos (el parser consolida cada archivo como una "parte").
+    if (pdfLiquiPages.length) liquiMaps.push(parseLiquidacionPdf(pdfLiquiPages));
+    const liqui = mergeLiquiMaps(liquiMaps);
     await yield_();
 
     // 2. Recibos (uno o varios PDF)
@@ -154,6 +168,33 @@ ui.btnValidar.addEventListener('click', async () => {
     ui.btnValidar.disabled = false;
   }
 });
+
+// Une varios mapas de liquidación {legajo: emp} en uno solo.
+// Caso normal (un solo archivo, o varios PDF que el parser ya consolidó): hay un único
+// mapa y no se fusiona nada. Si un mismo legajo aparece en más de un archivo, se consolida
+// igual que multi-bloque: los conceptos se concatenan y los campos numéricos se suman.
+function mergeLiquiMaps(maps) {
+  if (maps.length === 0) return {};
+  if (maps.length === 1) return maps[0];
+  const out = {};
+  for (const m of maps) {
+    for (const legajo of Object.keys(m)) {
+      out[legajo] = out[legajo] ? mergeEmpleado(out[legajo], m[legajo]) : m[legajo];
+    }
+  }
+  return out;
+}
+
+function mergeEmpleado(a, b) {
+  const r = { ...a };
+  for (const k of Object.keys(b)) {
+    const va = a[k], vb = b[k];
+    if (Array.isArray(vb)) r[k] = (Array.isArray(va) ? va : []).concat(vb); // conceptos, errores_parse…
+    else if (typeof vb === 'number') r[k] = (typeof va === 'number' ? va : 0) + vb; // bruto, neto, totales…
+    else if (va == null || va === '') r[k] = vb; // legajo/nombre: se conserva el primero no vacío
+  }
+  return r;
+}
 
 // Enriquece cada empleado con datos del recibo para mostrar en la tabla.
 function enrich(reporte, liqui, recibos) {

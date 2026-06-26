@@ -1,5 +1,5 @@
 // parser-recibos.js
-// Parser de PDFs de recibos Marval (recibo_contrib_v4.pdf, recibo_contrib_v4_rrhh.pdf).
+// Parser de PDFs de recibos del ERP Meta 4 (recibo_contrib_v4.pdf, recibo_contrib_v4_rrhh.pdf).
 // Port fiel desde src/parser_recibos.py.
 //
 // Módulo ES, sin dependencias de DOM/window: importable en Node (ESM) y en el
