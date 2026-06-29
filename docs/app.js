@@ -9,7 +9,7 @@
 import { extractPagesText } from './parsers/pdf-extract.js';
 import { parseRecibos } from './parsers/parser-recibos.js';
 import { parseLiquidacionPdf } from './parsers/parser-liquidacion-pdf.js';
-import { parseLiquidacionXlsx, detectXlsxColumns } from './parsers/parser-liquidacion-xlsx.js';
+import { parseLiquidacionXlsx, detectXlsxColumns, detectXlsxGroups } from './parsers/parser-liquidacion-xlsx.js';
 import { validar } from './core/validador.js';
 
 // pdf.js viene del <script> vendoreado (global pdfjsLib). Worker self-hosted.
@@ -25,6 +25,13 @@ const state = {
   // Índices de columna del Excel elegidos por el usuario (-1 = usar detección automática).
   xlsxColLegajoIdx: -1,
   xlsxColNombreIdx: -1,
+  xlsxColNetoIdx: -1,
+  // Agrupaciones de totales editables: { bruto:[{codigo,descripcion,signo}], desc:[...], contrib:[...] }
+  xlsxGrupos: null,
+  // Pool de todos los conceptos del Excel (para el control "agregar"): [{codigo,descripcion,grupo,esUnidad}]
+  xlsxTodos: [],
+  // Filas de encabezado del primer Excel (cache para re-detectar agrupaciones sin releer el archivo).
+  xlsxHeaderRows: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -36,7 +43,9 @@ const ui = {
   xlsxCfg: $('xlsx-cfg'),
   xlsxColLegajo: $('xlsx-col-legajo'), xlsxColLegajoBadge: $('xlsx-col-legajo-badge'),
   xlsxColNombre: $('xlsx-col-nombre'), xlsxColNombreBadge: $('xlsx-col-nombre-badge'),
+  xlsxColNeto: $('xlsx-col-neto'), xlsxColNetoBadge: $('xlsx-col-neto-badge'),
   xlsxCfgHint: $('xlsx-cfg-hint'),
+  xlsxGrupos: $('xlsx-grupos'), xgGroups: $('xg-groups'),
   secCarga: $('sec-carga'), rbFiles: $('rb-files'), rbCount: $('rb-count'),
   progress: $('progress'), ptxt: $('ptxt'),
   errbanner: $('errbanner'), errtext: $('errtext'),
@@ -107,8 +116,7 @@ wireDropzone(ui.dzRecibos, ui.inRecibos, setRecibos, true);
 // "Nueva validación": limpia todo y vuelve al estado inicial (cambiar de cliente).
 ui.btnReset.addEventListener('click', () => {
   state.liqui = []; state.recibos = [];
-  state.xlsxColLegajoIdx = -1; state.xlsxColNombreIdx = -1;
-  ui.xlsxCfg.hidden = true;
+  ocultarXlsxPaneles();
   ui.inLiqui.value = ''; ui.inRecibos.value = ''; ui.inCliente.value = '';
   setLiqui([]); setRecibos([]);
   ui.results.classList.remove('show');
@@ -125,23 +133,26 @@ ui.btnCambiar.addEventListener('click', () => {
 });
 
 // ─────────────── Picker de columnas Excel ───────────────
-// Detecta qué columna del primer Excel cargado contiene el legajo/nombre.
-// Actualiza el panel #xlsx-cfg si hay al menos un .xlsx en state.liqui.
+// Detecta qué columna del primer Excel cargado contiene legajo / nombre / neto, y las
+// agrupaciones de totales. Actualiza los paneles si hay al menos un .xlsx en state.liqui.
+function ocultarXlsxPaneles() {
+  ui.xlsxCfg.hidden = true;
+  ui.xlsxGrupos.hidden = true;
+  state.xlsxColLegajoIdx = -1; state.xlsxColNombreIdx = -1; state.xlsxColNetoIdx = -1;
+  state.xlsxGrupos = null; state.xlsxTodos = []; state.xlsxHeaderRows = null;
+}
+
 async function detectXlsxConfig() {
   const xlsxFile = state.liqui.find((f) => /\.(xlsx|xls)$/i.test(f.name));
-  if (!xlsxFile) {
-    ui.xlsxCfg.hidden = true;
-    state.xlsxColLegajoIdx = -1;
-    state.xlsxColNombreIdx = -1;
-    return;
-  }
+  if (!xlsxFile) { ocultarXlsxPaneles(); return; }
   try {
     const buf = await xlsxFile.arrayBuffer();
     // sheetRows:2 lee solo la fila de encabezados → detección rápida sin parsear datos.
     const wb = window.XLSX.read(new Uint8Array(buf), { type: 'array', sheetRows: 2 });
     const ws = wb.Sheets[wb.SheetNames[0]];
     const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
-    const { headers, legajoIdx, nombreIdx } = detectXlsxColumns(rows);
+    state.xlsxHeaderRows = rows;
+    const { headers, legajoIdx, nombreIdx, netoIdx } = detectXlsxColumns(rows);
 
     // Construir opciones del <select>: "— sin usar —" + una opción por columna.
     const makeOptions = (selIdx) => {
@@ -152,8 +163,10 @@ async function detectXlsxConfig() {
     };
     ui.xlsxColLegajo.innerHTML = makeOptions(legajoIdx);
     ui.xlsxColNombre.innerHTML = makeOptions(nombreIdx);
+    ui.xlsxColNeto.innerHTML = makeOptions(netoIdx);
     state.xlsxColLegajoIdx = legajoIdx;
     state.xlsxColNombreIdx = nombreIdx;
+    state.xlsxColNetoIdx = netoIdx;
 
     const setBadge = (el, idx) => {
       if (idx >= 0) { el.textContent = 'detectado'; el.className = 'xlsx-cfg-badge ok'; }
@@ -161,6 +174,7 @@ async function detectXlsxConfig() {
     };
     setBadge(ui.xlsxColLegajoBadge, legajoIdx);
     setBadge(ui.xlsxColNombreBadge, nombreIdx);
+    setBadge(ui.xlsxColNetoBadge, netoIdx);
 
     const hasWarn = legajoIdx < 0 || nombreIdx < 0;
     ui.xlsxCfgHint.textContent = hasWarn
@@ -168,8 +182,9 @@ async function detectXlsxConfig() {
       : 'Columnas detectadas automáticamente — modificalas si es necesario.';
 
     ui.xlsxCfg.hidden = false;
+    refreshGrupos(); // (re)detecta las agrupaciones de totales y las renderiza
   } catch {
-    ui.xlsxCfg.hidden = true;
+    ocultarXlsxPaneles();
   }
 }
 
@@ -184,6 +199,116 @@ ui.xlsxColLegajo.addEventListener('change', () =>
   onXlsxColChange(ui.xlsxColLegajo, ui.xlsxColLegajoBadge, 'xlsxColLegajoIdx'));
 ui.xlsxColNombre.addEventListener('change', () =>
   onXlsxColChange(ui.xlsxColNombre, ui.xlsxColNombreBadge, 'xlsxColNombreIdx'));
+// Cambiar la columna NETO mueve el punto de corte entre descuentos y contribuciones,
+// así que se vuelven a detectar las agrupaciones (descarta ediciones manuales previas).
+ui.xlsxColNeto.addEventListener('change', () => {
+  onXlsxColChange(ui.xlsxColNeto, ui.xlsxColNetoBadge, 'xlsxColNetoIdx');
+  refreshGrupos();
+});
+
+// ─────────────── Editor de agrupaciones de totales ───────────────
+const XG_DEFS = [
+  { key: 'bruto',   label: 'Bruto',                landmark: 'brutoStart', noDetectado: 'No se detectó el inicio del Bruto (códigos 1000–1003). Agregá los conceptos a mano.' },
+  { key: 'desc',    label: 'Total Descuentos',     landmark: 'descStart',  noDetectado: 'No se detectó el inicio de Descuentos (código 5010). Agregá los conceptos a mano.' },
+  { key: 'contrib', label: 'Total Contribuciones', landmark: 'contribEnd', noDetectado: 'No se detectó NETO o TARIFA. Revisá la columna NETO arriba o agregá los conceptos a mano.' },
+];
+let XG_LANDMARKS = { brutoStart: null, descStart: null, neto: false, contribEnd: null };
+
+// (Re)detecta las agrupaciones desde los encabezados cacheados y las renderiza.
+function refreshGrupos() {
+  if (!state.xlsxHeaderRows) { ui.xlsxGrupos.hidden = true; return; }
+  const idxNeto = state.xlsxColNetoIdx >= 0 ? state.xlsxColNetoIdx : undefined;
+  const g = detectXlsxGroups(state.xlsxHeaderRows, { idxNeto });
+  state.xlsxGrupos = { bruto: g.bruto, desc: g.desc, contrib: g.contrib };
+  state.xlsxTodos = g.todos;
+  XG_LANDMARKS = g.landmarks;
+  ui.xlsxGrupos.hidden = false;
+  renderGrupos();
+}
+
+// Devuelve la descripción de un código desde el pool (para el chip al agregar).
+function descDeCodigo(codigo) {
+  const t = state.xlsxTodos.find((c) => c.codigo === codigo);
+  return t ? t.descripcion : '';
+}
+function esUnidadCodigo(codigo) {
+  const t = state.xlsxTodos.find((c) => c.codigo === codigo);
+  return !!(t && t.esUnidad);
+}
+
+function renderGrupos() {
+  if (!state.xlsxGrupos) { ui.xgGroups.innerHTML = ''; return; }
+  ui.xgGroups.innerHTML = XG_DEFS.map((def) => {
+    const items = state.xlsxGrupos[def.key] || [];
+    const detectado = !!XG_LANDMARKS[def.landmark];
+    const warn = (!detectado && items.length === 0)
+      ? `<div class="xg-warn">${esc(def.noDetectado)}</div>` : '';
+    const chips = items.length
+      ? items.map((c) => {
+          const neg = c.signo === -1;
+          const unidad = esUnidadCodigo(c.codigo) ? '<span class="xg-unit" title="La heurística la marcó como unidad">unidad</span>' : '';
+          return `<span class="xg-chip${neg ? ' neg' : ''}" data-g="${def.key}" data-c="${esc(c.codigo)}">
+            <button class="xg-sign" title="Sumar (+) o restar (−)" aria-label="Cambiar signo">${neg ? '−' : '+'}</button>
+            <span class="xg-code">${esc(c.codigo)}</span>
+            <span class="xg-desc" title="${esc(c.descripcion)}">${esc(c.descripcion || '—')}</span>
+            ${unidad}
+            <button class="xg-rm" title="Quitar de este total" aria-label="Quitar">×</button>
+          </span>`;
+        }).join('')
+      : `<div class="xg-empty">Sin conceptos. Agregá con el menú de abajo.</div>`;
+    // Pool para "agregar": conceptos no presentes en este grupo.
+    const presentes = new Set(items.map((c) => c.codigo));
+    const opts = state.xlsxTodos
+      .filter((c) => !presentes.has(c.codigo))
+      .map((c) => `<option value="${esc(c.codigo)}">${esc(c.codigo)} · ${esc(c.descripcion || '—')}${c.esUnidad ? ' (unidad)' : ''}</option>`)
+      .join('');
+    return `<div class="xg-group">
+      <div class="xg-g-hd"><span class="xg-g-title">${esc(def.label)}</span><span class="xg-g-count">${items.length} conc.</span></div>
+      ${warn}
+      <div class="xg-chips">${chips}</div>
+      <select class="xg-add" data-g="${def.key}"><option value="">+ agregar concepto…</option>${opts}</select>
+    </div>`;
+  }).join('');
+
+  // Wire de eventos (delegados por re-render en cada cambio).
+  ui.xgGroups.querySelectorAll('.xg-sign').forEach((b) => b.addEventListener('click', () => {
+    const chip = b.closest('.xg-chip');
+    toggleSigno(chip.dataset.g, chip.dataset.c);
+  }));
+  ui.xgGroups.querySelectorAll('.xg-rm').forEach((b) => b.addEventListener('click', () => {
+    const chip = b.closest('.xg-chip');
+    quitarConcepto(chip.dataset.g, chip.dataset.c);
+  }));
+  ui.xgGroups.querySelectorAll('.xg-add').forEach((s) => s.addEventListener('change', () => {
+    if (s.value) agregarConcepto(s.dataset.g, s.value);
+  }));
+}
+
+function toggleSigno(grupo, codigo) {
+  const c = (state.xlsxGrupos[grupo] || []).find((x) => x.codigo === codigo);
+  if (c) { c.signo = c.signo === -1 ? 1 : -1; renderGrupos(); }
+}
+function quitarConcepto(grupo, codigo) {
+  state.xlsxGrupos[grupo] = (state.xlsxGrupos[grupo] || []).filter((x) => x.codigo !== codigo);
+  renderGrupos();
+}
+function agregarConcepto(grupo, codigo) {
+  const lista = state.xlsxGrupos[grupo] || (state.xlsxGrupos[grupo] = []);
+  if (!lista.some((x) => x.codigo === codigo)) {
+    lista.push({ codigo, descripcion: descDeCodigo(codigo), signo: 1 });
+  }
+  renderGrupos();
+}
+
+// Construye opts.grupos para el parser desde el estado editable.
+function gruposParaParser() {
+  if (!state.xlsxGrupos) return undefined;
+  const out = {};
+  for (const k of ['bruto', 'desc', 'contrib']) {
+    out[k] = Object.fromEntries((state.xlsxGrupos[k] || []).map((c) => [c.codigo, c.signo]));
+  }
+  return out;
+}
 
 // ─────────────── Helpers de progreso / error ───────────────
 function showProgress(msg) { ui.ptxt.innerHTML = msg; ui.progress.classList.add('show'); }
@@ -215,6 +340,8 @@ ui.btnValidar.addEventListener('click', async () => {
         liquiMaps.push(parseLiquidacionXlsx(rows, {
           colLegajoIdx: state.xlsxColLegajoIdx >= 0 ? state.xlsxColLegajoIdx : undefined,
           colNombreIdx: state.xlsxColNombreIdx >= 0 ? state.xlsxColNombreIdx : undefined,
+          colNetoIdx: state.xlsxColNetoIdx >= 0 ? state.xlsxColNetoIdx : undefined,
+          grupos: gruposParaParser(),
         }));
       } else {
         const buf = await f.arrayBuffer();
