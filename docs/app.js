@@ -32,6 +32,8 @@ const state = {
   xlsxTodos: [],
   // Filas de encabezado del primer Excel (cache para re-detectar agrupaciones sin releer el archivo).
   xlsxHeaderRows: null,
+  // ¿El usuario editó a mano columnas/grupos? Si sí, NO pisar con la config recordada (anti-clobber).
+  xlsxDirty: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -140,6 +142,7 @@ function ocultarXlsxPaneles() {
   ui.xlsxGrupos.hidden = true;
   state.xlsxColLegajoIdx = -1; state.xlsxColNombreIdx = -1; state.xlsxColNetoIdx = -1;
   state.xlsxGrupos = null; state.xlsxTodos = []; state.xlsxHeaderRows = null;
+  state.xlsxDirty = false;
 }
 
 async function detectXlsxConfig() {
@@ -183,6 +186,7 @@ async function detectXlsxConfig() {
 
     ui.xlsxCfg.hidden = false;
     refreshGrupos(); // (re)detecta las agrupaciones de totales y las renderiza
+    aplicarConfigCliente(); // si hay config recordada para este cliente, la aplica encima
   } catch {
     ocultarXlsxPaneles();
   }
@@ -195,16 +199,35 @@ function onXlsxColChange(select, badgeEl, stateKey) {
   badgeEl.textContent = 'modificado';
   badgeEl.className = 'xlsx-cfg-badge mod';
 }
-ui.xlsxColLegajo.addEventListener('change', () =>
-  onXlsxColChange(ui.xlsxColLegajo, ui.xlsxColLegajoBadge, 'xlsxColLegajoIdx'));
-ui.xlsxColNombre.addEventListener('change', () =>
-  onXlsxColChange(ui.xlsxColNombre, ui.xlsxColNombreBadge, 'xlsxColNombreIdx'));
+ui.xlsxColLegajo.addEventListener('change', () => {
+  onXlsxColChange(ui.xlsxColLegajo, ui.xlsxColLegajoBadge, 'xlsxColLegajoIdx');
+  marcarEditado();
+});
+ui.xlsxColNombre.addEventListener('change', () => {
+  onXlsxColChange(ui.xlsxColNombre, ui.xlsxColNombreBadge, 'xlsxColNombreIdx');
+  marcarEditado();
+});
 // Cambiar la columna NETO mueve el punto de corte entre descuentos y contribuciones,
 // así que se vuelven a detectar las agrupaciones (descarta ediciones manuales previas).
 ui.xlsxColNeto.addEventListener('change', () => {
   onXlsxColChange(ui.xlsxColNeto, ui.xlsxColNetoBadge, 'xlsxColNetoIdx');
-  refreshGrupos();
+  refreshGrupos();      // re-detecta agrupaciones con el nuevo corte (resetea dirty)
+  marcarEditado();      // ...pero la elección de NETO es manual: marcar y recordar
 });
+
+// Al terminar de escribir el nombre del cliente, si hay un Excel cargado, intentar
+// aplicar la configuración recordada de ese cliente (no pisa ediciones: ver xlsxDirty).
+ui.inCliente.addEventListener('change', () => {
+  if (state.xlsxHeaderRows) aplicarConfigCliente();
+});
+
+// Marca que el usuario editó la config a mano y la persiste (si hay nombre de cliente).
+// El flag evita que la config recordada pise ediciones al re-aplicarse.
+function marcarEditado() {
+  state.xlsxDirty = true;
+  persistirSiCliente();
+}
+function persistirSiCliente() { if (clientKey()) guardarConfigCliente(); }
 
 // ─────────────── Editor de agrupaciones de totales ───────────────
 const XG_DEFS = [
@@ -222,6 +245,7 @@ function refreshGrupos() {
   state.xlsxGrupos = { bruto: g.bruto, desc: g.desc, contrib: g.contrib };
   state.xlsxTodos = g.todos;
   XG_LANDMARKS = g.landmarks;
+  state.xlsxDirty = false; // detección automática fresca = base limpia (no editada)
   ui.xlsxGrupos.hidden = false;
   renderGrupos();
 }
@@ -286,18 +310,18 @@ function renderGrupos() {
 
 function toggleSigno(grupo, codigo) {
   const c = (state.xlsxGrupos[grupo] || []).find((x) => x.codigo === codigo);
-  if (c) { c.signo = c.signo === -1 ? 1 : -1; renderGrupos(); }
+  if (c) { c.signo = c.signo === -1 ? 1 : -1; renderGrupos(); marcarEditado(); }
 }
 function quitarConcepto(grupo, codigo) {
   state.xlsxGrupos[grupo] = (state.xlsxGrupos[grupo] || []).filter((x) => x.codigo !== codigo);
-  renderGrupos();
+  renderGrupos(); marcarEditado();
 }
 function agregarConcepto(grupo, codigo) {
   const lista = state.xlsxGrupos[grupo] || (state.xlsxGrupos[grupo] = []);
   if (!lista.some((x) => x.codigo === codigo)) {
     lista.push({ codigo, descripcion: descDeCodigo(codigo), signo: 1 });
   }
-  renderGrupos();
+  renderGrupos(); marcarEditado();
 }
 
 // Construye opts.grupos para el parser desde el estado editable.
@@ -308,6 +332,96 @@ function gruposParaParser() {
     out[k] = Object.fromEntries((state.xlsxGrupos[k] || []).map((c) => [c.codigo, c.signo]));
   }
   return out;
+}
+
+// ─────────────── Persistencia de configuración por cliente ───────────────
+// Recuerda, por nombre de cliente, qué columnas usar (legajo/nombre/neto) y las
+// agrupaciones de totales del Excel, para no reconfigurar en cada visita.
+// Privacidad: se guarda SOLO en localStorage (nunca sale del navegador) y solo metadata
+// estructural (índices de columna y códigos de concepto) — ningún dato de empleados.
+const CLIENTES_KEY = 'validador.clientes.v1';
+
+function clientKey() { return clientName().trim().toLowerCase(); }
+
+function loadClientes() {
+  try { return JSON.parse(localStorage.getItem(CLIENTES_KEY) || '{}') || {}; }
+  catch { return {}; }
+}
+function saveClientes(obj) {
+  try { localStorage.setItem(CLIENTES_KEY, JSON.stringify(obj)); } catch { /* cuota/privado: ignorar */ }
+}
+
+// Guarda la configuración actual del Excel bajo el cliente actual (si hay nombre y un .xlsx).
+function guardarConfigCliente() {
+  const key = clientKey();
+  if (!key || !state.xlsxGrupos) return; // sin nombre o sin Excel → nada que recordar
+  const slim = (arr) => (arr || []).map((c) => ({ codigo: c.codigo, signo: c.signo }));
+  const todos = loadClientes();
+  todos[key] = {
+    nombre: clientName().trim(),
+    colLegajoIdx: state.xlsxColLegajoIdx,
+    colNombreIdx: state.xlsxColNombreIdx,
+    colNetoIdx: state.xlsxColNetoIdx,
+    grupos: {
+      bruto: slim(state.xlsxGrupos.bruto),
+      desc: slim(state.xlsxGrupos.desc),
+      contrib: slim(state.xlsxGrupos.contrib),
+    },
+  };
+  saveClientes(todos);
+}
+
+// Aplica la configuración recordada del cliente actual sobre el Excel cargado (si existe).
+// Devuelve true si aplicó algo. NO pisa ediciones manuales del usuario (xlsxDirty) ni
+// afirma una restauración que no ocurrió: solo toca columnas/grupos que existen en este
+// archivo, y ajusta badges/hint a lo realmente aplicado.
+function aplicarConfigCliente() {
+  const key = clientKey();
+  if (!key || !state.xlsxHeaderRows) return false;
+  if (state.xlsxDirty) return false; // el usuario ya editó a mano: no pisar su trabajo
+  const cfg = loadClientes()[key];
+  if (!cfg) return false;
+
+  let aplicado = false;
+
+  // Columnas: solo si el índice guardado existe como opción en este archivo.
+  const setSel = (sel, badge, idx, stateKey) => {
+    if (idx == null || idx < 0) return false;
+    if (!sel.querySelector(`option[value="${idx}"]`)) return false; // la columna no existe acá
+    sel.value = String(idx);
+    state[stateKey] = idx;
+    badge.textContent = 'recordado'; badge.className = 'xlsx-cfg-badge mod';
+    return true;
+  };
+  if (setSel(ui.xlsxColLegajo, ui.xlsxColLegajoBadge, cfg.colLegajoIdx, 'xlsxColLegajoIdx')) aplicado = true;
+  if (setSel(ui.xlsxColNombre, ui.xlsxColNombreBadge, cfg.colNombreIdx, 'xlsxColNombreIdx')) aplicado = true;
+  if (setSel(ui.xlsxColNeto, ui.xlsxColNetoBadge, cfg.colNetoIdx, 'xlsxColNetoIdx')) aplicado = true;
+
+  // Agrupaciones: rehidratar SOLO los códigos que existen en el pool de este archivo
+  // (descarta códigos de otro período/layout en vez de dejar chips fantasma). Si ningún
+  // código recordado existe acá, no se tocan las agrupaciones autodetectadas.
+  if (cfg.grupos) {
+    const presente = (codigo) => state.xlsxTodos.some((t) => t.codigo === codigo);
+    const rehidratar = (arr) => (arr || [])
+      .filter((c) => presente(c.codigo))
+      .map((c) => ({ codigo: c.codigo, descripcion: descDeCodigo(c.codigo), signo: c.signo === -1 ? -1 : 1 }));
+    const g = {
+      bruto: rehidratar(cfg.grupos.bruto),
+      desc: rehidratar(cfg.grupos.desc),
+      contrib: rehidratar(cfg.grupos.contrib),
+    };
+    if (g.bruto.length + g.desc.length + g.contrib.length > 0) {
+      state.xlsxGrupos = g;
+      renderGrupos();
+      aplicado = true;
+    }
+  }
+
+  if (aplicado) {
+    state.xlsxDirty = false; // la config recordada pasa a ser la base limpia
+    ui.xlsxCfgHint.textContent = `Configuración recordada para "${cfg.nombre || clientName().trim()}" — ajustala si hace falta.`;
+  }
+  return aplicado;
 }
 
 // ─────────────── Helpers de progreso / error ───────────────
@@ -379,6 +493,7 @@ ui.btnValidar.addEventListener('click', async () => {
       ui.btnValidar.disabled = false;
       return;
     }
+    guardarConfigCliente(); // recordar la config del Excel para este cliente
     render(reporte);
     ui.results.classList.add('show');
     ui.secCarga.classList.add('collapsed');
