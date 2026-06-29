@@ -9,7 +9,7 @@
 import { extractPagesText } from './parsers/pdf-extract.js';
 import { parseRecibos } from './parsers/parser-recibos.js';
 import { parseLiquidacionPdf } from './parsers/parser-liquidacion-pdf.js';
-import { parseLiquidacionXlsx } from './parsers/parser-liquidacion-xlsx.js';
+import { parseLiquidacionXlsx, detectXlsxColumns } from './parsers/parser-liquidacion-xlsx.js';
 import { validar } from './core/validador.js';
 
 // pdf.js viene del <script> vendoreado (global pdfjsLib). Worker self-hosted.
@@ -20,7 +20,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
 // liqui y recibos son ambos arrays: se admiten varios archivos por lado y se cruzan
 // contra un conjunto unificado (consolidado por legajo). Útil cuando hay anexos /
 // confidenciales que se agregan aparte y deben sumarse a la liquidación principal.
-const state = { liqui: [], recibos: [] };
+const state = {
+  liqui: [], recibos: [],
+  // Índices de columna del Excel elegidos por el usuario (-1 = usar detección automática).
+  xlsxColLegajoIdx: -1,
+  xlsxColNombreIdx: -1,
+};
 
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -28,6 +33,10 @@ const ui = {
   dzLiqui: $('dz-liqui'), dzRecibos: $('dz-recibos'),
   filesLiqui: $('files-liqui'), filesRecibos: $('files-recibos'),
   btnValidar: $('btn-validar'), btnReset: $('btn-reset'), btnCambiar: $('btn-cambiar'),
+  xlsxCfg: $('xlsx-cfg'),
+  xlsxColLegajo: $('xlsx-col-legajo'), xlsxColLegajoBadge: $('xlsx-col-legajo-badge'),
+  xlsxColNombre: $('xlsx-col-nombre'), xlsxColNombreBadge: $('xlsx-col-nombre-badge'),
+  xlsxCfgHint: $('xlsx-cfg-hint'),
   secCarga: $('sec-carga'), rbFiles: $('rb-files'), rbCount: $('rb-count'),
   progress: $('progress'), ptxt: $('ptxt'), ppct: $('ppct'), pbarFill: $('pbar-fill'),
   errbanner: $('errbanner'), errtext: $('errtext'),
@@ -57,6 +66,7 @@ function setLiqui(files) {
     ui.dzLiqui.classList.remove('filled');
   }
   refreshButton();
+  detectXlsxConfig(); // async — actualiza el panel de columnas si hay un Excel
 }
 
 function setRecibos(files) {
@@ -97,6 +107,8 @@ wireDropzone(ui.dzRecibos, ui.inRecibos, setRecibos, true);
 // "Nueva validación": limpia todo y vuelve al estado inicial (cambiar de cliente).
 ui.btnReset.addEventListener('click', () => {
   state.liqui = []; state.recibos = [];
+  state.xlsxColLegajoIdx = -1; state.xlsxColNombreIdx = -1;
+  ui.xlsxCfg.hidden = true;
   ui.inLiqui.value = ''; ui.inRecibos.value = ''; ui.inCliente.value = '';
   setLiqui([]); setRecibos([]);
   ui.results.classList.remove('show');
@@ -111,6 +123,67 @@ ui.btnCambiar.addEventListener('click', () => {
   ui.secCarga.classList.remove('collapsed');
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
+
+// ─────────────── Picker de columnas Excel ───────────────
+// Detecta qué columna del primer Excel cargado contiene el legajo/nombre.
+// Actualiza el panel #xlsx-cfg si hay al menos un .xlsx en state.liqui.
+async function detectXlsxConfig() {
+  const xlsxFile = state.liqui.find((f) => /\.(xlsx|xls)$/i.test(f.name));
+  if (!xlsxFile) {
+    ui.xlsxCfg.hidden = true;
+    state.xlsxColLegajoIdx = -1;
+    state.xlsxColNombreIdx = -1;
+    return;
+  }
+  try {
+    const buf = await xlsxFile.arrayBuffer();
+    // sheetRows:2 lee solo la fila de encabezados → detección rápida sin parsear datos.
+    const wb = window.XLSX.read(new Uint8Array(buf), { type: 'array', sheetRows: 2 });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+    const { headers, legajoIdx, nombreIdx } = detectXlsxColumns(rows);
+
+    // Construir opciones del <select>: "— sin usar —" + una opción por columna.
+    const makeOptions = (selIdx) => {
+      const opt0 = `<option value="-1">— sin usar —</option>`;
+      return opt0 + headers.map((h) =>
+        `<option value="${h.idx}"${h.idx === selIdx ? ' selected' : ''}>${esc(h.name)}</option>`
+      ).join('');
+    };
+    ui.xlsxColLegajo.innerHTML = makeOptions(legajoIdx);
+    ui.xlsxColNombre.innerHTML = makeOptions(nombreIdx);
+    state.xlsxColLegajoIdx = legajoIdx;
+    state.xlsxColNombreIdx = nombreIdx;
+
+    const setBadge = (el, idx) => {
+      if (idx >= 0) { el.textContent = 'detectado'; el.className = 'xlsx-cfg-badge ok'; }
+      else          { el.textContent = 'no detectado'; el.className = 'xlsx-cfg-badge warn'; }
+    };
+    setBadge(ui.xlsxColLegajoBadge, legajoIdx);
+    setBadge(ui.xlsxColNombreBadge, nombreIdx);
+
+    const hasWarn = legajoIdx < 0 || nombreIdx < 0;
+    ui.xlsxCfgHint.textContent = hasWarn
+      ? 'Seleccioná manualmente las columnas sin detectar.'
+      : 'Columnas detectadas automáticamente — modificalas si es necesario.';
+
+    ui.xlsxCfg.hidden = false;
+  } catch {
+    ui.xlsxCfg.hidden = true;
+  }
+}
+
+// Cuando el usuario cambia una columna manualmente, actualizar estado y badge.
+function onXlsxColChange(select, badgeEl, stateKey) {
+  const idx = parseInt(select.value, 10);
+  state[stateKey] = idx;
+  badgeEl.textContent = 'modificado';
+  badgeEl.className = 'xlsx-cfg-badge mod';
+}
+ui.xlsxColLegajo.addEventListener('change', () =>
+  onXlsxColChange(ui.xlsxColLegajo, ui.xlsxColLegajoBadge, 'xlsxColLegajoIdx'));
+ui.xlsxColNombre.addEventListener('change', () =>
+  onXlsxColChange(ui.xlsxColNombre, ui.xlsxColNombreBadge, 'xlsxColNombreIdx'));
 
 // ─────────────── Helpers de progreso / error ───────────────
 function showProgress(msg, pct) {
@@ -163,7 +236,10 @@ ui.btnValidar.addEventListener('click', async () => {
         const wb = window.XLSX.read(new Uint8Array(buf), { type: 'array' });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = window.XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
-        liquiMaps.push(parseLiquidacionXlsx(rows));
+        liquiMaps.push(parseLiquidacionXlsx(rows, {
+          colLegajoIdx: state.xlsxColLegajoIdx >= 0 ? state.xlsxColLegajoIdx : undefined,
+          colNombreIdx: state.xlsxColNombreIdx >= 0 ? state.xlsxColNombreIdx : undefined,
+        }));
       } else {
         const buf = await f.arrayBuffer();
         const pages = await extractPagesText(new Uint8Array(buf), pdfjsLib,
