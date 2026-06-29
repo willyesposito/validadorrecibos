@@ -37,6 +37,20 @@ const _KEYWORDS_UNIDAD = [
   'DIAS', 'PORC', 'UN_', 'U_DIAS', 'LIC_S_GOS', 'P_OBRA_SOC', 'SDOS_',
 ];
 
+// Aliases conocidos para la columna de legajo (en orden de prioridad).
+// Cubre variantes de Meta 4 y otros ERP. La búsqueda es exacta (trim, case-insensitive
+// se maneja al comparar en mayúsculas en indicePorAliases).
+const _LEGAJO_ALIASES = [
+  'EMPLEADO', 'ID_EMPLEADO', 'LEGAJO', 'NRO_LEGAJO', 'N_LEGAJO', 'LEG', 'NRO_LEG',
+];
+
+// Aliases conocidos para la columna de nombre/apellido.
+const _NOMBRE_ALIASES = [
+  'APELLIDO Y NOMBRE',
+  'APPELIDO Y NOMBRE',  // typo frecuente en reportes Meta 4
+  'APELLIDO_Y_NOMBRE', 'NOMBRE Y APELLIDO', 'NOMBRE',
+];
+
 // Convierte un string de dinero AR ('1.234.567,89') o US ('1,234,567.89') a número.
 // Replica EXACTAMENTE parse_money del Python. Devuelve null donde Python devuelve None.
 function parseMoney(s) {
@@ -83,8 +97,7 @@ function esColumnaUnidad(codigo, descripcion) {
   return _KEYWORDS_UNIDAD.some((kw) => up.indexOf(kw) !== -1);
 }
 
-// Localiza el índice (0-based) de una columna por header exacto (trim, sin distinguir
-// mayúsculas/minúsculas extra). Devuelve -1 si no aparece.
+// Localiza el índice (0-based) de una columna por header exacto (trim). Devuelve -1.
 function indicePorHeader(headers, nombre) {
   const objetivo = String(nombre).trim();
   for (let i = 0; i < headers.length; i++) {
@@ -95,12 +108,26 @@ function indicePorHeader(headers, nombre) {
   return -1;
 }
 
+// Prueba una lista de aliases en orden de prioridad; devuelve el índice del primero que
+// aparezca (comparación case-insensitive), o -1 si ninguno está.
+function indicePorAliases(headers, aliases) {
+  for (const alias of aliases) {
+    const objetivo = alias.toUpperCase();
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i];
+      if (h === null || h === undefined) continue;
+      if (String(h).trim().toUpperCase() === objetivo) return i;
+    }
+  }
+  return -1;
+}
+
 // Parsea los encabezados y precomputa metadata de cada columna de concepto.
 // Devuelve { idxEmpleado, idxNombre, idxNeto, columnas: [{indice, codigo, descripcion,
 //            lado:'EMPLEADO'|'CONTRIB', esUnidad}] }.
 function parsearEncabezados(headers) {
-  const idxEmpleado = indicePorHeader(headers, 'EMPLEADO');
-  const idxNombre = indicePorHeader(headers, 'APELLIDO Y NOMBRE');
+  const idxEmpleado = indicePorAliases(headers, _LEGAJO_ALIASES);
+  const idxNombre = indicePorAliases(headers, _NOMBRE_ALIASES);
   const idxNeto = indicePorHeader(headers, 'NETO');
 
   const columnas = [];
@@ -169,15 +196,48 @@ function sumarOpcional(acumulado, valor) {
   return Math.round(((acumulado || 0) + valor) * 100) / 100;
 }
 
+/**
+ * Detecta qué columnas del Excel corresponden al legajo y al nombre, sin parsear datos.
+ * Útil para que la UI muestre un picker de columnas cuando la detección automática no
+ * reconoce los headers del archivo.
+ *
+ * @param {Array<Array>} rows — matriz de la hoja (sheet_to_json header:1), solo se usa rows[0]
+ * @returns {{ headers: {idx:number, name:string}[], legajoIdx: number, nombreIdx: number }}
+ *   legajoIdx / nombreIdx = -1 si no se detectó.
+ */
+export function detectXlsxColumns(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { headers: [], legajoIdx: -1, nombreIdx: -1 };
+  }
+  const raw = rows[0] || [];
+  const headers = raw
+    .map((h, i) => ({ idx: i, name: h != null ? String(h).trim() : '' }))
+    .filter((h) => h.name !== '');
+  return {
+    headers,
+    legajoIdx: indicePorAliases(raw, _LEGAJO_ALIASES),
+    nombreIdx: indicePorAliases(raw, _NOMBRE_ALIASES),
+  };
+}
+
 // Parser principal.
 // rows: Array<Array<any>> — la hoja como matriz fila-por-fila (sheet_to_json header:1).
+// opts.colLegajoIdx / opts.colNombreIdx: override del índice de columna (elegido por el usuario
+//   en el picker de la UI); -1 o undefined = usar la detección automática por aliases.
 // Devuelve { [legajo]: LiquidacionEmpleado } consolidado por legajo.
-export function parseLiquidacionXlsx(rows) {
+export function parseLiquidacionXlsx(rows, opts = {}) {
   const resultados = {};
   if (!Array.isArray(rows) || rows.length === 0) return resultados;
 
   const headers = rows[0] || [];
   const meta = parsearEncabezados(headers);
+  // Overrides del picker de columnas de la UI (el usuario eligió manualmente).
+  if (opts.colLegajoIdx != null && Number(opts.colLegajoIdx) >= 0) {
+    meta.idxEmpleado = Number(opts.colLegajoIdx);
+  }
+  if (opts.colNombreIdx != null && Number(opts.colNombreIdx) >= 0) {
+    meta.idxNombre = Number(opts.colNombreIdx);
+  }
 
   // Acumulador por legajo: junta filas (cada fila = un bloque por fecha de imputación).
   // estado[legajo] = { legajo, nombre, neto, total_contrib, conceptos, n_bloques }

@@ -227,6 +227,51 @@ body {
 
 .actions { display: flex; align-items: center; gap: 16px; margin-top: 22px; flex-wrap: wrap; }
 
+/* ─────────────── Panel de columnas Excel ─────────────── */
+.xlsx-cfg {
+  margin-top: 14px;
+  padding: 13px 16px 14px;
+  border: 1px solid var(--celeste-border);
+  border-radius: var(--r-sm);
+  background: var(--celeste-dim);
+}
+.xlsx-cfg-hd {
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 11px;
+}
+.xlsx-cfg-ico { color: var(--celeste-dark); display: flex; flex: none; }
+.xlsx-cfg-title { font-weight: 700; font-size: 0.85rem; color: var(--navy); }
+.xlsx-cfg-hint { font-size: 0.78rem; color: var(--t2); margin-left: 4px; }
+.xlsx-cfg-rows { display: flex; gap: 16px; flex-wrap: wrap; }
+.xlsx-cfg-row { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 190px; }
+.xlsx-cfg-lbl {
+  font-size: 0.72rem; font-weight: 700; color: var(--t2);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.xlsx-cfg-sel-wrap { display: flex; align-items: center; gap: 8px; }
+.xlsx-cfg-sel {
+  flex: 1; min-width: 0;
+  font-family: var(--font); font-size: 0.84rem;
+  padding: 5px 8px; border-radius: var(--r-sm);
+  border: 1px solid var(--celeste-border);
+  background: var(--white); color: var(--t1);
+  cursor: pointer;
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+}
+.xlsx-cfg-sel:focus {
+  outline: none; border-color: var(--celeste);
+  box-shadow: 0 0 0 3px rgba(0,172,212,0.18);
+}
+.xlsx-cfg-badge {
+  font-size: 0.71rem; font-weight: 700;
+  padding: 2px 8px; border-radius: var(--r-full);
+  white-space: nowrap; flex: none;
+  border: 1px solid transparent;
+}
+.xlsx-cfg-badge.ok   { background: var(--ok-bg);      color: var(--ok-tx);      border-color: var(--ok-bd); }
+.xlsx-cfg-badge.warn { background: var(--warn-bg);     color: var(--warn-tx);    border-color: var(--warn-bd); }
+.xlsx-cfg-badge.mod  { background: var(--celeste-dim); color: var(--celeste-dark); border-color: var(--celeste-border); }
+
 /* ─────────────── Barra compacta (post-validación) ─────────────── */
 #runbar { display: none; }
 #sec-carga.collapsed .block-head,
