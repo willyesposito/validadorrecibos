@@ -154,7 +154,26 @@
               <span class="xlsx-cfg-badge" id="xlsx-col-nombre-badge"></span>
             </div>
           </div>
+          <div class="xlsx-cfg-row">
+            <label class="xlsx-cfg-lbl" for="xlsx-col-neto">Neto</label>
+            <div class="xlsx-cfg-sel-wrap">
+              <select class="xlsx-cfg-sel" id="xlsx-col-neto"></select>
+              <span class="xlsx-cfg-badge" id="xlsx-col-neto-badge"></span>
+            </div>
+          </div>
         </div>
+      </div>
+
+      <!-- Panel de agrupaciones de totales: aparece cuando la liquidación incluye un .xlsx -->
+      <div class="xlsx-grupos" id="xlsx-grupos" hidden>
+        <div class="xlsx-cfg-hd">
+          <span class="xlsx-cfg-ico" aria-hidden="true">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="xlsx-cfg-title">Totales del Excel</span>
+          <span class="xlsx-cfg-hint">Conceptos que suman cada total. Cambiá el signo con <b>+ / −</b>, quitá con <b>×</b> o agregá los que falten.</span>
+        </div>
+        <div class="xg-groups" id="xg-groups"></div>
       </div>
 
       <div class="actions">
