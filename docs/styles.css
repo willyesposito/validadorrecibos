@@ -47,7 +47,7 @@
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html { font-size: 16px; }
+html { font-size: 16px; color-scheme: light; }
 body {
   background: var(--paper);
   color: var(--t1);
@@ -56,6 +56,7 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  transition: background var(--t) var(--ease), color var(--t) var(--ease);
 }
 .num { font-variant-numeric: tabular-nums; }
 
@@ -95,6 +96,19 @@ body {
 }
 .hdr-r .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); flex: none; }
 @media (max-width: 720px) { .hdr-r { display: none; } }
+
+/* Toggle de tema (claro/oscuro) */
+.btn-theme {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 38px; height: 38px; border-radius: var(--r-full);
+  border: 1px solid var(--line); background: var(--white); color: var(--t2);
+  cursor: pointer; transition: border-color var(--t) var(--ease), color var(--t) var(--ease), background var(--t) var(--ease);
+}
+.btn-theme:hover { border-color: var(--celeste); color: var(--celeste); }
+.btn-theme svg { display: block; }
+.btn-theme .ico-sun { display: none; }
+[data-theme="dark"] .btn-theme .ico-moon { display: none; }
+[data-theme="dark"] .btn-theme .ico-sun { display: block; }
 
 /* ─────────────── Layout ─────────────── */
 .main { max-width: 1280px; margin: 0 auto; padding: 0 40px; }
@@ -448,3 +462,51 @@ tr.dr.open .di { display: block; }
 .foot-grid div { line-height: 1.6; color: var(--t2); }
 .foot-grid strong { display: block; color: var(--celeste); font-weight: 700; font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
 .foot-legal { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line-soft); font-size: 0.74rem; color: var(--t3); }
+
+/* ───────────────────────────────────────────────────────────────────
+   Dark mode — redefine los tokens del :root sobre fondo navy profundo.
+   Como casi todo el CSS referencia variables, basta con redefinirlas;
+   abajo se corrigen los pocos colores hardcodeados (header, thead,
+   hover de filas, detalle, ícono de búsqueda).
+   Se activa con [data-theme="dark"] en <html> (toggle en el header;
+   preferencia persistida en localStorage; respeta prefers-color-scheme).
+   ─────────────────────────────────────────────────────────────────── */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --celeste: #1FBEE0;
+  --celeste-dark: #16A6C6;
+  --celeste-deeper: #5AD2EE;     /* énfasis: más brillante para leer sobre navy */
+  --celeste-dim: rgba(31, 190, 224, 0.14);
+  --celeste-border: rgba(31, 190, 224, 0.34);
+  --gris: #9FB1C2;
+
+  --ink: #EAF1F8;                /* títulos / serif */
+  --navy: #C9D8E8;
+  --t1: #DCE6F0;                 /* texto principal */
+  --t2: #92A6BC;                 /* secundario */
+  --t3: #5F758D;                 /* terciario / placeholders */
+
+  --paper: #0B1521;              /* fondo de página */
+  --white: #111E2C;              /* superficie de tarjetas */
+  --line: #23364A;               /* hairline estándar */
+  --line-soft: #1A2837;          /* hairline sutil */
+
+  --ok: #22C55E;       --ok-bg: rgba(34, 197, 94, 0.15);    --ok-bd: rgba(34, 197, 94, 0.36);   --ok-tx: #4ADE80;
+  --warn: #F59E0B;     --warn-bg: rgba(245, 158, 11, 0.15); --warn-bd: rgba(245, 158, 11, 0.36); --warn-tx: #FBBF24;
+  --error: #E85518;    --error-bg: rgba(232, 85, 24, 0.16); --error-bd: rgba(232, 85, 24, 0.42); --error-tx: #FB8254;
+  --neutral: #8C837B;  --neutral-bg: rgba(140, 131, 123, 0.18); --neutral-bd: rgba(140, 131, 123, 0.34); --neutral-tx: #B6ABA0;
+
+  --sh-sm: 0 1px 4px rgba(0, 0, 0, 0.40);
+  --sh: 0 8px 28px rgba(0, 0, 0, 0.50);
+  --sh-celeste: 0 8px 28px rgba(31, 190, 224, 0.22);
+}
+
+/* Colores hardcodeados que las variables no alcanzan */
+[data-theme="dark"] .hdr { background: rgba(11, 21, 33, 0.85); }
+[data-theme="dark"] thead th { background: #16263A; box-shadow: inset 0 -1.5px 0 var(--line); }
+[data-theme="dark"] tbody tr.row:hover { background: rgba(255, 255, 255, 0.03); }
+[data-theme="dark"] tbody tr.s-error:hover { background: rgba(232, 85, 24, 0.12); }
+[data-theme="dark"] tbody tr.s-warn:hover { background: rgba(245, 158, 11, 0.12); }
+[data-theme="dark"] .di { background: rgba(255, 255, 255, 0.025); }
+[data-theme="dark"] .search svg [stroke] { stroke: var(--t3); }

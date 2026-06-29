@@ -176,22 +176,37 @@ NUNCA inventar ni asumir datos de empleados: todo dato del reporte sale de lo qu
 
 ## Automatizaciones de Claude Code (`.claude/`)
 
-El repo trae hooks, skills y un subagent. Config en `.claude/` (no se publica en Pages).
+El repo trae hooks, skills y subagents. Config en `.claude/` (no se publica en Pages).
 
-**Hooks** (`.claude/settings.json` → `.claude/hooks/guard.mjs`, ya activos):
-- `PreToolUse/Bash`: **bloquea** versionar datos reales de payroll (`git add/commit/stash` de
-  `*.pdf/*.xlsx/*.csv/Archivos/`). Red de seguridad sobre el `.gitignore` (cubre `git add -f`).
-- `PreToolUse/Edit|Write`: **bloquea** editar a mano `docs/vendor/**` (libs vendoreadas).
+**Hooks** (`.claude/settings.json`, ya activos):
+- `PreToolUse/Bash` (`guard.mjs`): **bloquea** versionar datos reales de payroll (`git add/commit/stash`
+  de `*.pdf/*.xlsx/*.csv/Archivos/`). Red de seguridad sobre el `.gitignore` (cubre `git add -f`).
+- `PreToolUse/Edit|Write|MultiEdit` (`guard.mjs`): **bloquea** editar a mano `docs/vendor/**` (libs vendoreadas).
+- `PostToolUse/Edit|Write|MultiEdit` (`post-edit-reminder.mjs`): **NO bloquea** (la tool ya corrió);
+  tras editar el MOTOR (`docs/parsers/*` o `docs/core/validador.js`) o la UI
+  (`docs/index.html|app.js|styles.css`) recuerda por stderr qué verificación corresponde
+  (motor → `verify-golden` + `business-rules-reviewer`; UI → `smoke-ui` + `ui-brand-reviewer`).
+  Anti-ruido: una sola vez por sesión y por categoría (marcador en el temp del SO).
 
 **Skills — Claude las ejecuta SOLO, sin que se las pidan, cuando es conveniente:**
 - `verify-golden`: **correr proactivamente** después de tocar cualquier parser
   (`docs/parsers/*`) o `docs/core/validador.js`, y antes de mergear. Compara contra la
   referencia dorada (531/518/13).
+- `smoke-ui`: **correr proactivamente** tras tocar la UI (`docs/index.html`, `styles.css`, `app.js`)
+  y antes de mergear. Smoke test SIN datos reales (bootea sin errores de consola, toggle dark/claro
+  persiste, estructura clave). Complementa `verify-golden`, no lo reemplaza.
 - `deploy-check`: **correr proactivamente** antes de cualquier commit que vaya a `main` o de
   proponer mergear el PR. Verifica que no haya datos reales versionados y que `/docs` esté apto.
 
-**Subagent** `business-rules-reviewer`: revisar diffs del motor contra las reglas de negocio
-de arriba (lanzarlo cuando se modifiquen parsers/validador).
+**Subagents:**
+- `business-rules-reviewer`: revisar diffs del MOTOR contra las reglas de negocio de arriba
+  (lanzarlo cuando se modifiquen parsers/validador).
+- `ui-brand-reviewer`: revisar diffs de la CAPA DE UI (marca H&A, dark mode/contraste AA en ambos
+  temas, accesibilidad, flujo errores-primero). NO revisa el motor.
+- `privacy-auditor`: auditar el diff/staging buscando PII real de empleados pegada INLINE
+  (CUIT/CUIL, legajo+nombre+monto, montos hardcodeados) — cubre el agujero que `guard.mjs` NO ve
+  (sólo bloquea archivos por ruta, no contenido). Lanzar antes de cualquier commit, sobre todo si
+  se tocó `docs/`, `CLAUDE.md` o `README`.
 
 **MCP (manual, fuera del repo):** Playwright (`claude mcp add playwright -- npx -y @playwright/mcp@latest`)
 y context7 (`@upstash/context7-mcp`).
