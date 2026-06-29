@@ -235,7 +235,10 @@ function enrich(reporte, liqui, recibos) {
 }
 
 // ─────────────── Render del reporte interactivo ───────────────
-let D = null, F = 'all', SC = 'legajo', SD = 1, SQ = '', RUN_AT = null;
+// F  = filtro por nivel de resultado (all/OK/ERROR/ADVERTENCIA/SIN_PAR)
+// FT = filtro por TIPO de hallazgo (chips de categoría); null = sin filtro
+// FC = filtro por CÓDIGO de concepto (panel conceptos más conflictivos); null = sin filtro
+let D = null, F = 'all', FT = null, FC = null, SC = 'legajo', SD = 1, SQ = '', RUN_AT = null;
 
 function fARS(n) {
   if (n == null) return '—';
@@ -248,14 +251,73 @@ const SC_MAP = { OK: 'ok', ERROR: 'error', ADVERTENCIA: 'warn', SIN_PAR: 'sinpar
 const SL_MAP = { OK: '✓ OK', ERROR: '✕ Error', ADVERTENCIA: '⚠ Advertencia', SIN_PAR: '? Sin par' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Metadatos por tipo de hallazgo: etiqueta para chips, etiqueta corta para la fila,
+// y severidad (color). El orden del array fija el orden de los chips.
+const TIPO_ORDER = ['MONTO_DIFIERE', 'TOTAL_DIFIERE', 'CONCEPTO_FALTANTE', 'CONCEPTO_DUPLICADO', 'TORTA_NO_SUMA', 'LEGAJO_SIN_PAR'];
+const TIPO_META = {
+  MONTO_DIFIERE: { label: 'monto difiere', short: 'monto', sev: 'error' },
+  TOTAL_DIFIERE: { label: 'total difiere', short: 'total', sev: 'error' },
+  CONCEPTO_FALTANTE: { label: 'concepto faltante', short: 'falta concepto', sev: 'error' },
+  CONCEPTO_DUPLICADO: { label: 'concepto duplicado', short: 'duplicado', sev: 'error' },
+  TORTA_NO_SUMA: { label: 'torta no suma', short: 'torta', sev: 'warn' },
+  LEGAJO_SIN_PAR: { label: 'sin par', short: 'sin par', sev: 'neutral' },
+};
+
+// Cuenta EMPLEADOS distintos afectados por cada tipo de hallazgo (no ocurrencias:
+// un empleado con 2 montos cuenta 1 vez para MONTO_DIFIERE). Así el número del chip
+// coincide con las filas que se ven al filtrar por ese tipo.
+function aggregateByTipo() {
+  const counts = {};
+  for (const e of D.empleados) {
+    const seen = new Set();
+    for (const h of (e.hallazgos || [])) {
+      if (seen.has(h.tipo)) continue;
+      seen.add(h.tipo);
+      counts[h.tipo] = (counts[h.tipo] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+// Agrega por CÓDIGO de concepto (sólo hallazgos con código: MONTO_DIFIERE,
+// CONCEPTO_FALTANTE, CONCEPTO_DUPLICADO). Devuelve [{codigo, descripcion, n}] ordenado
+// por empleados afectados desc. Es la vista de "causa raíz": un código que falla en
+// muchos empleados suele ser un único problema sistémico.
+function aggregateByCodigo() {
+  const m = {};
+  for (const e of D.empleados) {
+    const seen = new Set();
+    for (const h of (e.hallazgos || [])) {
+      if (!h.codigo || seen.has(h.codigo)) continue;
+      seen.add(h.codigo);
+      const k = String(h.codigo);
+      if (!m[k]) m[k] = { codigo: k, descripcion: h.descripcion || '', n: 0 };
+      m[k].n += 1;
+      if (!m[k].descripcion && h.descripcion) m[k].descripcion = h.descripcion;
+    }
+  }
+  return Object.values(m).sort((a, b) => b.n - a.n || a.codigo.localeCompare(b.codigo));
+}
+
+// Resumen de tipos de un empleado para la fila (ej. "monto ×2 · total ×1").
+function tipoSummary(e) {
+  const counts = {};
+  for (const h of (e.hallazgos || [])) counts[h.tipo] = (counts[h.tipo] || 0) + 1;
+  return TIPO_ORDER.filter((t) => counts[t]).map((t) => {
+    const m = TIPO_META[t];
+    return `<span class="nom-tag sev-${m.sev}">${m.short}${counts[t] > 1 ? ' ×' + counts[t] : ''}</span>`;
+  }).join('');
+}
+
 function render(reporte) {
   D = reporte;
   RUN_AT = new Date();
   // Errores primero: si hay diferencias, abrir directamente ese filtro.
   F = reporte.resumen.errores > 0 ? 'ERROR' : 'all';
+  FT = null; FC = null;
   SC = 'legajo'; SD = 1; SQ = '';
   $('q').value = '';
-  renderVerdict(); renderContext(); renderCards(); renderChip(); renderTable();
+  renderVerdict(); renderContext(); renderCards(); renderCatChips(); renderConceptos(); renderChip(); renderTable();
 }
 
 function renderVerdict() {
@@ -319,7 +381,7 @@ function renderCards() {
     `<div class="kpi ${kc}${F === f ? ' active' : ''}" data-f="${f}" role="button" tabindex="0" title="Filtrar: ${l}">
       <div class="kpi-l">${l}</div><div class="kpi-n c-${c}">${v}</div><div class="kpi-d">${d}</div></div>`).join('');
   document.querySelectorAll('.kpi').forEach((k) => {
-    const go = () => { F = k.dataset.f; renderCards(); renderChip(); renderTable(); };
+    const go = () => { F = k.dataset.f; FT = null; FC = null; renderCards(); renderChip(); renderCatChips(); renderConceptos(); renderTable(); };
     k.addEventListener('click', go);
     k.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
   });
@@ -338,14 +400,76 @@ function renderChip() {
 }
 ui.chipSinpar.addEventListener('click', () => {
   F = (F === 'SIN_PAR') ? 'all' : 'SIN_PAR';
-  renderCards(); renderChip(); renderTable();
+  FT = null; FC = null;
+  renderCards(); renderChip(); renderCatChips(); renderConceptos(); renderTable();
 });
+
+// ─────────────── Chips de categoría (filtro por tipo de hallazgo) ───────────────
+function renderCatChips() {
+  const el = $('catchips');
+  if (!D) { el.className = 'catchips'; el.innerHTML = ''; return; }
+  const counts = aggregateByTipo();
+  const present = TIPO_ORDER.filter((t) => counts[t] > 0);
+  if (!present.length) { el.className = 'catchips'; el.innerHTML = ''; return; }
+  el.className = 'catchips show';
+  const lead = `<span class="cc-lead">Categorías</span>`;
+  el.innerHTML = lead + present.map((t) => {
+    const m = TIPO_META[t]; const n = counts[t];
+    return `<button class="catchip sev-${m.sev}${FT === t ? ' active' : ''}" data-t="${t}" aria-pressed="${FT === t}"
+      title="Filtrar por: ${m.label} — ${n} ${n === 1 ? 'empleado' : 'empleados'}">
+      <span class="cc-dot"></span>${m.label}<span class="cc-n">${n}</span></button>`;
+  }).join('');
+  el.querySelectorAll('.catchip').forEach((b) => b.addEventListener('click', () => {
+    const t = b.dataset.t;
+    FT = (FT === t) ? null : t;   // toggle
+    FC = null; F = 'all';         // el tipo manda: limpiar código y ver todos los niveles
+    renderCards(); renderChip(); renderCatChips(); renderConceptos(); renderTable();
+  }));
+}
+
+// ─────────────── Conceptos más conflictivos (causa raíz) ───────────────
+function renderConceptos() {
+  const el = $('conceptos');
+  if (!D) { el.className = 'conceptos'; el.innerHTML = ''; return; }
+  const items = aggregateByCodigo();
+  const top = items.slice(0, 8);
+  // Sólo vale la pena el panel si hay al menos un código que afecte a 2+ empleados.
+  if (!top.length || top[0].n < 2) { el.className = 'conceptos'; el.innerHTML = ''; return; }
+  el.className = 'conceptos show';
+  const max = top[0].n || 1;
+  const head = `<div class="cn-head">
+    <span class="cn-ico" aria-hidden="true"><svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <span class="cn-title">Conceptos más conflictivos</span>
+    <span class="cn-sub">una causa, varios empleados · clic para filtrar</span></div>`;
+  const rows = top.map((x) => {
+    const w = Math.max(6, Math.round((x.n / max) * 100));
+    return `<div class="cn-row${FC === x.codigo ? ' active' : ''}" data-c="${esc(x.codigo)}" role="button" tabindex="0"
+      title="Filtrar por código ${esc(x.codigo)} — ${x.n} ${x.n === 1 ? 'empleado' : 'empleados'}">
+      <span class="cn-code">${esc(x.codigo)}</span>
+      <span class="cn-name" title="${esc(x.descripcion || '')}">${esc(x.descripcion || '—')}</span>
+      <span class="cn-bar"><span style="width:${w}%"></span></span>
+      <span class="cn-n">${x.n} <span>empl.</span></span></div>`;
+  }).join('');
+  el.innerHTML = head + rows;
+  el.querySelectorAll('.cn-row').forEach((r) => {
+    const go = () => {
+      const c = r.dataset.c;
+      FC = (FC === c) ? null : c;   // toggle
+      FT = null; F = 'all';
+      renderCards(); renderChip(); renderCatChips(); renderConceptos(); renderTable();
+    };
+    r.addEventListener('click', go);
+    r.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
+}
 
 function visible() {
   const q = SQ.toLowerCase();
   const numeric = ['legajo', 'bruto', 'neto', 'contrib', 'costo', 'torta', 'n_conceptos'];
   return D.empleados.filter((e) => {
     if (F !== 'all' && e.resultado !== F) return false;
+    if (FT && !(e.hallazgos || []).some((h) => h.tipo === FT)) return false;
+    if (FC && !(e.hallazgos || []).some((h) => String(h.codigo) === String(FC))) return false;
     if (q && !e.nombre.toLowerCase().includes(q) && !e.legajo.includes(q)) return false;
     return true;
   }).sort((a, b) => {
@@ -380,9 +504,10 @@ function renderTable() {
     const hi = e.hallazgos && e.hallazgos.length > 0;
     const t = e.torta != null ? e.torta.toFixed(2) + '%' : '—';
     const tc = e.torta != null && Math.abs(e.torta - 100) <= 1 ? 'ok' : 'warn';
+    const tags = tipoSummary(e);
     const main = `<tr class="row s-${s}${hi ? ' hi' : ''}" data-leg="${esc(e.legajo)}">
       <td class="leg">${esc(e.legajo)}</td>
-      <td class="nom">${esc(e.nombre)}</td>
+      <td><div class="nom-wrap"><span class="nom">${esc(e.nombre)}</span>${tags ? `<div class="nom-tags">${tags}</div>` : ''}</div></td>
       <td class="r">${fARS(e.bruto)}</td>
       <td class="r">${fARS(e.neto)}</td>
       <td class="r">${fARS(e.contrib)}</td>

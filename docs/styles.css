@@ -363,6 +363,58 @@ body {
 .kpi-n.c-error { color: var(--error-tx); }
 .kpi-n.c-warn { color: var(--warn-tx); }
 
+/* ─────────────── Chips de categoría (filtro por tipo de diferencia) ─────────────── */
+.catchips { display: none; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 18px; }
+.catchips.show { display: flex; }
+.catchips .cc-lead { font-size: 0.64rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--t3); margin-right: 2px; display: inline-flex; align-items: center; gap: 6px; }
+.catchip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+  border-radius: var(--r-full); border: 1px solid var(--line); background: var(--white);
+  color: var(--t1); font-family: inherit; font-size: 0.82rem; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), background var(--t) var(--ease);
+}
+.catchip:hover { border-color: var(--celeste-border); box-shadow: var(--sh-sm); }
+.catchip .cc-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.catchip .cc-n { font-weight: 800; font-variant-numeric: tabular-nums; padding: 1px 8px; border-radius: var(--r-full); font-size: 0.76rem; }
+.catchip.sev-error .cc-dot { background: var(--error); }
+.catchip.sev-error .cc-n { background: var(--error-bg); color: var(--error-tx); }
+.catchip.sev-warn .cc-dot { background: var(--warn); }
+.catchip.sev-warn .cc-n { background: var(--warn-bg); color: var(--warn-tx); }
+.catchip.sev-neutral .cc-dot { background: var(--neutral); }
+.catchip.sev-neutral .cc-n { background: var(--neutral-bg); color: var(--neutral-tx); }
+.catchip.active { border-color: var(--ink); box-shadow: var(--sh-sm); }
+.catchip.active.sev-error { border-color: var(--error); }
+.catchip.active.sev-warn { border-color: var(--warn); }
+.catchip.active.sev-neutral { border-color: var(--neutral-tx); }
+
+/* ─────────────── Conceptos más conflictivos (causa raíz) ─────────────── */
+.conceptos { display: none; background: var(--white); border: 1px solid var(--line); border-radius: var(--r); padding: 16px 20px; margin-bottom: 22px; box-shadow: var(--sh-sm); }
+.conceptos.show { display: block; }
+.conceptos .cn-head { display: flex; align-items: baseline; gap: 9px; margin-bottom: 12px; }
+.conceptos .cn-ico { color: var(--celeste); align-self: center; display: inline-flex; }
+.conceptos .cn-title { font-family: var(--serif); font-weight: 400; font-size: 1.05rem; color: var(--ink); letter-spacing: -0.01em; }
+.conceptos .cn-sub { font-size: 0.76rem; color: var(--t3); }
+.conceptos .cn-row { display: flex; align-items: center; gap: 12px; padding: 5px 8px; margin: 0 -8px; cursor: pointer; border-radius: var(--r-sm); transition: background var(--t) var(--ease); }
+.conceptos .cn-row:hover { background: var(--celeste-dim); }
+.conceptos .cn-row.active { background: var(--celeste-dim); }
+.conceptos .cn-code { font-variant-numeric: tabular-nums; font-size: 0.78rem; color: var(--t3); width: 54px; flex: none; font-weight: 700; }
+.conceptos .cn-name { font-size: 0.85rem; color: var(--t2); width: 168px; flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.conceptos .cn-bar { flex: 1; height: 9px; background: var(--line-soft); border-radius: 5px; overflow: hidden; min-width: 40px; }
+.conceptos .cn-bar > span { display: block; height: 100%; background: var(--celeste); border-radius: 5px; }
+.conceptos .cn-row.active .cn-bar > span { background: var(--celeste-deeper); }
+.conceptos .cn-n { font-weight: 800; font-variant-numeric: tabular-nums; width: 88px; text-align: right; flex: none; color: var(--ink); font-size: 0.82rem; }
+.conceptos .cn-n span { font-weight: 600; color: var(--t3); font-size: 0.74rem; }
+@media (max-width: 640px) { .conceptos .cn-name { width: 96px; } .conceptos .cn-n { width: 64px; } }
+
+/* Mini-resumen de tipos por fila (bajo el nombre) */
+.nom-wrap { display: flex; flex-direction: column; gap: 3px; }
+.nom-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.nom-tag { display: inline-block; font-size: 0.63rem; font-weight: 700; letter-spacing: 0.02em; padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
+.nom-tag.sev-error { background: var(--error-bg); color: var(--error-tx); }
+.nom-tag.sev-warn { background: var(--warn-bg); color: var(--warn-tx); }
+.nom-tag.sev-neutral { background: var(--neutral-bg); color: var(--neutral-tx); }
+
 /* Toolbar */
 .toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
 .tb-count { font-size: 0.82rem; color: var(--t2); font-weight: 600; }
