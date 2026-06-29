@@ -116,35 +116,35 @@ body {
 
 /* ─────────────── Hero (panel) ─────────────── */
 .hero {
-  display: grid; grid-template-columns: 1.5fr 1fr; gap: 0; margin-top: 28px;
+  display: grid; grid-template-columns: 1.5fr 1fr; gap: 0; margin-top: 18px;
   background: var(--white); border: 1px solid var(--line); border-radius: var(--r);
   box-shadow: var(--sh-sm); overflow: hidden;
 }
 @media (max-width: 860px) { .hero { grid-template-columns: 1fr; } }
-.hero-l { padding: 34px 34px 32px; display: flex; flex-direction: column; }
+.hero-l { padding: 24px 30px 22px; display: flex; flex-direction: column; }
 .hero-eyebrow {
   font-size: 0.68rem; font-weight: 700; letter-spacing: 0.16em;
   text-transform: uppercase; color: var(--celeste); margin-bottom: 12px;
 }
 .hero h1 {
   font-family: var(--serif); font-weight: 400;
-  font-size: clamp(1.8rem, 3vw, 2.5rem); line-height: 1.04;
+  font-size: clamp(1.5rem, 2.4vw, 2.05rem); line-height: 1.06;
   color: var(--ink); letter-spacing: -0.01em;
 }
 .hero h1 .accent { color: var(--celeste); }
 .hero-sub {
-  margin-top: 12px; max-width: 42em;
-  font-size: 0.98rem; line-height: 1.55; color: var(--t2); text-wrap: pretty;
+  margin-top: 9px; max-width: 42em;
+  font-size: 0.9rem; line-height: 1.5; color: var(--t2); text-wrap: pretty;
 }
-.hero-meta { display: flex; flex-wrap: wrap; gap: 9px 22px; margin-top: auto; padding-top: 22px; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: auto; padding-top: 16px; }
 .hero-meta .mi { display: inline-flex; align-items: center; gap: 8px; font-size: 0.84rem; color: var(--t2); font-weight: 600; white-space: nowrap; }
 .hero-meta .mi .bullet { width: 7px; height: 7px; border-radius: 50%; background: var(--celeste); flex: none; }
 .hero-meta .mi b { color: var(--ink); font-weight: 800; }
 
 .hero-r {
-  position: relative; padding: 30px 30px 28px; border-left: 1px solid var(--line);
+  position: relative; padding: 22px 26px; border-left: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(0,172,212,0.035), rgba(0,172,212,0) 60%);
-  display: flex; flex-direction: column; gap: 18px; overflow: hidden;
+  display: flex; flex-direction: column; gap: 14px; overflow: hidden;
 }
 @media (max-width: 860px) { .hero-r { border-left: none; border-top: 1px solid var(--line); } }
 .hero-arcs { position: absolute; right: -48px; bottom: -42px; opacity: 0.2; pointer-events: none; z-index: 0; }
@@ -162,7 +162,7 @@ body {
 .cli-hint { font-size: 0.73rem; color: var(--t3); margin-top: 7px; }
 
 /* Mini guía de 3 pasos */
-.hero-steps { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 11px; padding-top: 18px; border-top: 1px solid var(--line-soft); }
+.hero-steps { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 9px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 .hstep { display: flex; align-items: baseline; gap: 12px; }
 .hstep .hs-no { font-family: var(--serif); font-size: 1.05rem; color: var(--celeste); line-height: 1; min-width: 1.5em; }
 .hstep .hs-tx { font-size: 0.85rem; color: var(--t2); line-height: 1.35; }
@@ -172,7 +172,7 @@ body {
 .privacy {
   display: flex; gap: 14px; align-items: flex-start;
   background: var(--white); border: 1px solid var(--line);
-  border-radius: var(--r); padding: 14px 18px;
+  border-radius: var(--r); padding: 11px 16px;
   box-shadow: var(--sh-sm);
 }
 .privacy .lock {
@@ -184,7 +184,7 @@ body {
 .privacy b { color: var(--ink); font-weight: 700; }
 
 /* ─────────────── Bloques / secciones ─────────────── */
-.block { padding: 30px 0 0; }
+.block { padding: 20px 0 0; }
 .block-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 18px; }
 .block-no {
   font-family: var(--serif); font-weight: 400; font-size: 1.9rem;
@@ -207,7 +207,7 @@ body {
 
 .dz {
   position: relative; border: 1.5px dashed var(--line); background: var(--white);
-  border-radius: var(--r); padding: 26px 22px; text-align: center;
+  border-radius: var(--r); padding: 20px 20px; text-align: center;
   cursor: pointer; transition: border-color var(--t) var(--ease), background var(--t) var(--ease), box-shadow var(--t) var(--ease), transform var(--t) var(--ease);
 }
 .dz:hover { border-color: var(--celeste-border); box-shadow: var(--sh); transform: translateY(-2px); }
@@ -280,8 +280,13 @@ body {
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-.progress .ptxt { font-size: 0.95rem; color: var(--t2); }
+.progress .pgr { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.progress .ptop { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.progress .ptxt { font-size: 0.95rem; color: var(--t2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .progress .ptxt b { color: var(--ink); font-weight: 700; }
+.progress .ppct { font-size: 0.95rem; font-weight: 800; color: var(--celeste-deeper); font-variant-numeric: tabular-nums; flex: none; }
+.progress .pbar { height: 8px; background: var(--line-soft); border-radius: 5px; overflow: hidden; }
+.progress .pbar > span { display: block; height: 100%; width: 0; background: var(--celeste); border-radius: 5px; transition: width 0.2s var(--ease); }
 
 /* ─────────────── Banner de error (carga) ─────────────── */
 .errbanner {

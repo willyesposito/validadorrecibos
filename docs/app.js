@@ -29,7 +29,7 @@ const ui = {
   filesLiqui: $('files-liqui'), filesRecibos: $('files-recibos'),
   btnValidar: $('btn-validar'), btnReset: $('btn-reset'), btnCambiar: $('btn-cambiar'),
   secCarga: $('sec-carga'), rbFiles: $('rb-files'), rbCount: $('rb-count'),
-  progress: $('progress'), ptxt: $('ptxt'),
+  progress: $('progress'), ptxt: $('ptxt'), ppct: $('ppct'), pbarFill: $('pbar-fill'),
   errbanner: $('errbanner'), errtext: $('errtext'),
   results: $('results'), verdict: $('verdict'), runctx: $('runctx'),
   chipSinpar: $('chip-sinpar'), btnExport: $('btn-export'),
@@ -113,8 +113,22 @@ ui.btnCambiar.addEventListener('click', () => {
 });
 
 // ─────────────── Helpers de progreso / error ───────────────
-function showProgress(msg) { ui.ptxt.innerHTML = msg; ui.progress.classList.add('show'); }
+function showProgress(msg, pct) {
+  ui.ptxt.innerHTML = msg;
+  if (typeof pct === 'number') {
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    ui.ppct.textContent = p + '%';
+    if (ui.pbarFill) ui.pbarFill.style.width = p + '%';
+  }
+  ui.progress.classList.add('show');
+}
 function hideProgress() { ui.progress.classList.remove('show'); }
+// Scrollea un elemento a la vista dejando aire para el header sticky.
+function scrollToEl(el, offset) {
+  if (!el) return;
+  const top = el.getBoundingClientRect().top + window.scrollY - (offset == null ? 84 : offset);
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+}
 function showError(msg) { ui.errtext.innerHTML = msg; ui.errbanner.classList.add('show'); }
 function clearError() { ui.errbanner.classList.remove('show'); }
 const yield_ = () => new Promise((r) => setTimeout(r, 0));
@@ -125,6 +139,16 @@ ui.btnValidar.addEventListener('click', async () => {
   ui.results.classList.remove('show');
   ui.btnValidar.disabled = true;
   try {
+    // Progreso global: la extracción de PDF/Excel (lo lento) ocupa el 90% de la barra;
+    // el 10% final es parseo + validación. doneFiles avanza al terminar cada archivo.
+    const totalFiles = Math.max(1, state.liqui.length + state.recibos.length);
+    let doneFiles = 0;
+    const pctExtract = (frac) => ((doneFiles + (frac || 0)) / totalFiles) * 90;
+
+    showProgress('Leyendo archivos…', 0);
+    scrollToEl(ui.progress); // que el % quede a la vista al validar (que el hero no lo tape)
+    await yield_();
+
     // 1. Liquidación (uno o varios archivos; PDF y/o Excel, mezclables)
     const liquiMaps = [];     // mapas {legajo: emp} parciales a fusionar
     const pdfLiquiPages = []; // páginas de TODOS los PDF de liqui (van juntos al parser)
@@ -133,7 +157,7 @@ ui.btnValidar.addEventListener('click', async () => {
       const f = state.liqui[i];
       const name = f.name.toLowerCase();
       if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
-        showProgress(`Leyendo liquidación (Excel ${i + 1}/${nL}: ${f.name})…`);
+        showProgress(`Leyendo liquidación (Excel ${i + 1}/${nL}: ${f.name})…`, pctExtract(0));
         await yield_();
         const buf = await f.arrayBuffer();
         const wb = window.XLSX.read(new Uint8Array(buf), { type: 'array' });
@@ -143,9 +167,10 @@ ui.btnValidar.addEventListener('click', async () => {
       } else {
         const buf = await f.arrayBuffer();
         const pages = await extractPagesText(new Uint8Array(buf), pdfjsLib,
-          (n, t) => showProgress(`Leyendo liquidación (PDF ${i + 1}/${nL}: ${f.name})… página <b>${n}/${t}</b>`));
+          (n, t) => showProgress(`Leyendo liquidación (PDF ${i + 1}/${nL}: ${f.name})… página <b>${n}/${t}</b>`, pctExtract(n / t)));
         pdfLiquiPages.push(pages);
       }
+      doneFiles++;
     }
     // Todos los PDF se parsean juntos (el parser consolida cada archivo como una "parte").
     if (pdfLiquiPages.length) liquiMaps.push(parseLiquidacionPdf(pdfLiquiPages));
@@ -158,14 +183,15 @@ ui.btnValidar.addEventListener('click', async () => {
       const f = state.recibos[i];
       const buf = await f.arrayBuffer();
       const pages = await extractPagesText(new Uint8Array(buf), pdfjsLib,
-        (n, t) => showProgress(`Leyendo recibos (${i + 1}/${state.recibos.length}: ${f.name})… página <b>${n}/${t}</b>`));
+        (n, t) => showProgress(`Leyendo recibos (${i + 1}/${state.recibos.length}: ${f.name})… página <b>${n}/${t}</b>`, pctExtract(n / t)));
       pagesByFile.push(pages);
+      doneFiles++;
     }
     const recibos = parseRecibos(pagesByFile);
     await yield_();
 
     // 3. Validar + enriquecer
-    showProgress('Validando…');
+    showProgress('Validando…', 95);
     await yield_();
     const reporte = validar(liqui, recibos);
     enrich(reporte, liqui, recibos);
@@ -424,6 +450,7 @@ function renderCatChips() {
     FT = (FT === t) ? null : t;   // toggle
     FC = null; F = 'all';         // el tipo manda: limpiar código y ver todos los niveles
     renderCards(); renderChip(); renderCatChips(); renderConceptos(); renderTable();
+    if (FT) scrollToEl(document.querySelector('.toolbar'), 80); // llevar directo a las filas filtradas
   }));
 }
 
@@ -457,6 +484,7 @@ function renderConceptos() {
       FC = (FC === c) ? null : c;   // toggle
       FT = null; F = 'all';
       renderCards(); renderChip(); renderCatChips(); renderConceptos(); renderTable();
+      if (FC) scrollToEl(document.querySelector('.toolbar'), 80); // llevar directo a las filas del código
     };
     r.addEventListener('click', go);
     r.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
