@@ -1,5 +1,10 @@
 // app.js — Orquestación en el navegador: carga de archivos → extracción → parseo
 // → validación → reporte interactivo. Todo client-side; nada se sube a internet.
+//
+// Rediseño orientado a REVISIÓN (multi-cliente, 1 a la vez): tras validar, la zona
+// de carga se colapsa, se prioriza el filtro de errores, los KPIs funcionan como
+// filtros y se puede exportar las diferencias a CSV. Los parsers y el validador
+// (core/validador.js) no se tocan: esto es solo la capa de UI.
 
 import { extractPagesText } from './parsers/pdf-extract.js';
 import { parseRecibos } from './parsers/parser-recibos.js';
@@ -22,11 +27,18 @@ const ui = {
   inLiqui: $('in-liqui'), inRecibos: $('in-recibos'),
   dzLiqui: $('dz-liqui'), dzRecibos: $('dz-recibos'),
   filesLiqui: $('files-liqui'), filesRecibos: $('files-recibos'),
-  btnValidar: $('btn-validar'), btnReset: $('btn-reset'),
+  btnValidar: $('btn-validar'), btnReset: $('btn-reset'), btnCambiar: $('btn-cambiar'),
+  secCarga: $('sec-carga'), rbFiles: $('rb-files'), rbCount: $('rb-count'),
   progress: $('progress'), ptxt: $('ptxt'),
   errbanner: $('errbanner'), errtext: $('errtext'),
-  results: $('results'),
+  results: $('results'), verdict: $('verdict'), runctx: $('runctx'),
+  chipSinpar: $('chip-sinpar'), btnExport: $('btn-export'),
+  inCliente: $('in-cliente'), rbCliente: $('rb-cliente'),
 };
+
+// Nombre del cliente que se está procesando (campo del hero). Se usa en el
+// contexto de la corrida, la barra compacta y el nombre del CSV exportado.
+function clientName() { return (ui.inCliente.value || '').trim(); }
 
 function refreshButton() {
   ui.btnValidar.disabled = !(state.liqui.length > 0 && state.recibos.length > 0);
@@ -82,13 +94,22 @@ function wireDropzone(dz, input, onFiles, multiple) {
 wireDropzone(ui.dzLiqui, ui.inLiqui, setLiqui, true);
 wireDropzone(ui.dzRecibos, ui.inRecibos, setRecibos, true);
 
+// "Nueva validación": limpia todo y vuelve al estado inicial (cambiar de cliente).
 ui.btnReset.addEventListener('click', () => {
   state.liqui = []; state.recibos = [];
-  ui.inLiqui.value = ''; ui.inRecibos.value = '';
+  ui.inLiqui.value = ''; ui.inRecibos.value = ''; ui.inCliente.value = '';
   setLiqui([]); setRecibos([]);
   ui.results.classList.remove('show');
   ui.errbanner.classList.remove('show');
-  ui.btnReset.style.display = 'none';
+  ui.secCarga.classList.remove('collapsed');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+// "Cambiar archivos": re-expande la zona de carga conservando el resultado actual
+// hasta que se vuelva a validar.
+ui.btnCambiar.addEventListener('click', () => {
+  ui.secCarga.classList.remove('collapsed');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
 // ─────────────── Helpers de progreso / error ───────────────
@@ -157,8 +178,10 @@ ui.btnValidar.addEventListener('click', async () => {
     }
     render(reporte);
     ui.results.classList.add('show');
-    ui.btnReset.style.display = '';
-    ui.results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    ui.secCarga.classList.add('collapsed');
+    fillRunbar(reporte);
+    const top = ui.results.getBoundingClientRect().top + window.scrollY - 90;
+    window.scrollTo({ top, behavior: 'smooth' });
   } catch (err) {
     hideProgress();
     console.error(err);
@@ -170,9 +193,6 @@ ui.btnValidar.addEventListener('click', async () => {
 });
 
 // Une varios mapas de liquidación {legajo: emp} en uno solo.
-// Caso normal (un solo archivo, o varios PDF que el parser ya consolidó): hay un único
-// mapa y no se fusiona nada. Si un mismo legajo aparece en más de un archivo, se consolida
-// igual que multi-bloque: los conceptos se concatenan y los campos numéricos se suman.
 function mergeLiquiMaps(maps) {
   if (maps.length === 0) return {};
   if (maps.length === 1) return maps[0];
@@ -189,9 +209,9 @@ function mergeEmpleado(a, b) {
   const r = { ...a };
   for (const k of Object.keys(b)) {
     const va = a[k], vb = b[k];
-    if (Array.isArray(vb)) r[k] = (Array.isArray(va) ? va : []).concat(vb); // conceptos, errores_parse…
-    else if (typeof vb === 'number') r[k] = (typeof va === 'number' ? va : 0) + vb; // bruto, neto, totales…
-    else if (va == null || va === '') r[k] = vb; // legajo/nombre: se conserva el primero no vacío
+    if (Array.isArray(vb)) r[k] = (Array.isArray(va) ? va : []).concat(vb);
+    else if (typeof vb === 'number') r[k] = (typeof va === 'number' ? va : 0) + vb;
+    else if (va == null || va === '') r[k] = vb;
   }
   return r;
 }
@@ -215,7 +235,7 @@ function enrich(reporte, liqui, recibos) {
 }
 
 // ─────────────── Render del reporte interactivo ───────────────
-let D = null, F = 'all', SC = 'legajo', SD = 1, SQ = '';
+let D = null, F = 'all', SC = 'legajo', SD = 1, SQ = '', RUN_AT = null;
 
 function fARS(n) {
   if (n == null) return '—';
@@ -229,35 +249,97 @@ const SL_MAP = { OK: '✓ OK', ERROR: '✕ Error', ADVERTENCIA: '⚠ Advertencia
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function render(reporte) {
-  D = reporte; F = 'all'; SC = 'legajo'; SD = 1; SQ = '';
+  D = reporte;
+  RUN_AT = new Date();
+  // Errores primero: si hay diferencias, abrir directamente ese filtro.
+  F = reporte.resumen.errores > 0 ? 'ERROR' : 'all';
+  SC = 'legajo'; SD = 1; SQ = '';
   $('q').value = '';
-  renderCards(); renderFilters(); renderTable();
+  renderVerdict(); renderContext(); renderCards(); renderChip(); renderTable();
+}
+
+function renderVerdict() {
+  const r = D.resumen;
+  const el = ui.verdict;
+  let cls, ico, title, sub;
+  if (r.errores > 0) {
+    cls = 'v-error'; ico = '!';
+    title = `<b>${r.errores}</b> ${r.errores === 1 ? 'recibo requiere' : 'recibos requieren'} revisión`;
+    const extra = [];
+    if (r.advertencias > 0) extra.push(`${r.advertencias} ${r.advertencias === 1 ? 'advertencia' : 'advertencias'}`);
+    if (r.sin_par > 0) extra.push(`${r.sin_par} sin par`);
+    sub = `Mostrando primero las diferencias · ${r.ok} sin diferencias${extra.length ? ' · ' + extra.join(' · ') : ''}`;
+  } else if (r.advertencias > 0) {
+    cls = 'v-warn'; ico = '⚠';
+    title = `<b>${r.advertencias}</b> ${r.advertencias === 1 ? 'advertencia' : 'advertencias'} para revisar`;
+    sub = `Sin diferencias de monto · ${r.ok} recibos correctos${r.sin_par ? ' · ' + r.sin_par + ' sin par' : ''}`;
+  } else if (r.sin_par > 0) {
+    cls = 'v-warn'; ico = '?';
+    title = `<b>${r.sin_par}</b> ${r.sin_par === 1 ? 'legajo sin par' : 'legajos sin par'}`;
+    sub = `Sin diferencias de monto · ${r.ok} recibos correctos`;
+  } else {
+    cls = 'v-ok'; ico = '✓';
+    title = `Todo cuadra`;
+    sub = `Los ${r.total} recibos coinciden con la liquidación dentro de la tolerancia`;
+  }
+  el.className = 'verdict ' + cls;
+  el.innerHTML = `<span class="v-ico">${ico}</span>
+    <div class="v-txt"><div class="v-title">${title}</div><div class="v-sub">${sub}</div></div>`;
+}
+
+function renderContext() {
+  const fmt = (d) => {
+    const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    const hh = String(d.getHours()).padStart(2, '0'), mm = String(d.getMinutes()).padStart(2, '0');
+    return `${d.getDate()} ${meses[d.getMonth()]} ${d.getFullYear()}, ${hh}:${mm}`;
+  };
+  const cli = clientName();
+  const items = [
+    ['Empleados', String(D.resumen.total), ''],
+    ['Archivos', `${state.liqui.length} liq · ${state.recibos.length} rec`, ''],
+    ['Motor', 'Meta 4', ''],
+    ['Corrida', fmt(RUN_AT || new Date()), ''],
+    ['Tolerancia', '±$1,00 / total', ''],
+  ];
+  if (cli) items.unshift(['Cliente', cli, 'celeste']);
+  ui.runctx.innerHTML = items.map(([l, v, c]) =>
+    `<div class="rc"><span class="rc-l">${l}</span><span class="rc-v ${c}">${esc(v)}</span></div>`).join('');
 }
 
 function renderCards() {
   const r = D.resumen;
+  // [label, valor, claseNum, detalle, filtro, claseKpi]
   const cards = [
-    ['Total empleados', r.total, 'total', 'En este lote'],
-    ['Sin diferencias', r.ok, 'ok', 'Recibos correctos'],
-    ['Con errores', r.errores, 'error', 'Requieren revisión'],
-    ['Advertencias', r.advertencias, 'warn', 'Torta u otros'],
+    ['Total empleados', r.total, 'total', 'En este lote', 'all', ''],
+    ['Sin diferencias', r.ok, 'ok', 'Recibos correctos', 'OK', 'k-ok'],
+    ['Con errores', r.errores, 'error', 'Requieren revisión', 'ERROR', 'k-error'],
+    ['Advertencias', r.advertencias, 'warn', 'Torta u otros', 'ADVERTENCIA', 'k-warn'],
   ];
-  $('cards').innerHTML = cards.map(([l, v, c, d]) =>
-    `<div class="kpi"><div class="kpi-l">${l}</div><div class="kpi-n c-${c}">${v}</div><div class="kpi-d">${d}</div></div>`).join('');
+  $('cards').innerHTML = cards.map(([l, v, c, d, f, kc]) =>
+    `<div class="kpi ${kc}${F === f ? ' active' : ''}" data-f="${f}" role="button" tabindex="0" title="Filtrar: ${l}">
+      <div class="kpi-l">${l}</div><div class="kpi-n c-${c}">${v}</div><div class="kpi-d">${d}</div></div>`).join('');
+  document.querySelectorAll('.kpi').forEach((k) => {
+    const go = () => { F = k.dataset.f; renderCards(); renderChip(); renderTable(); };
+    k.addEventListener('click', go);
+    k.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+  });
 }
 
-function renderFilters() {
+function renderChip() {
   const r = D.resumen;
-  const fs = [
-    ['all', `Todos (${r.total})`], ['OK', `OK (${r.ok})`], ['ERROR', `Errores (${r.errores})`],
-    ['ADVERTENCIA', `Advertencias (${r.advertencias})`], ['SIN_PAR', `Sin par (${r.sin_par})`],
-  ];
-  $('filters').innerHTML = fs.map(([id, lbl]) =>
-    `<button class="fbtn${F === id ? ' active' : ''}" data-f="${id}">${lbl}</button>`).join('');
-  document.querySelectorAll('.fbtn').forEach((b) => b.addEventListener('click', () => {
-    F = b.dataset.f; renderTable(); renderFilters();
-  }));
+  const c = ui.chipSinpar;
+  if (r.sin_par > 0) {
+    c.className = 'chip-sinpar show' + (F === 'SIN_PAR' ? ' active' : '');
+    c.textContent = `? ${r.sin_par} sin par`;
+  } else {
+    c.className = 'chip-sinpar';
+    c.textContent = '';
+  }
 }
+ui.chipSinpar.addEventListener('click', () => {
+  F = (F === 'SIN_PAR') ? 'all' : 'SIN_PAR';
+  renderCards(); renderChip(); renderTable();
+});
 
 function visible() {
   const q = SQ.toLowerCase();
@@ -291,7 +373,7 @@ function renderTable() {
     return;
   }
   empty.style.display = 'none';
-  $('footcount').textContent = `Mostrando ${rows.length} de ${D.empleados.length} empleados`;
+  $('footcount').innerHTML = `Mostrando <b>${rows.length}</b> de ${D.empleados.length} empleados`;
 
   tb.innerHTML = rows.flatMap((e) => {
     const s = SC_MAP[e.resultado] || 'sinpar';
@@ -338,3 +420,47 @@ document.querySelectorAll('th[data-col]').forEach((t) => t.addEventListener('cli
   renderTable();
 }));
 $('q').addEventListener('input', (e) => { SQ = e.target.value; renderTable(); });
+
+// ─────────────── Barra compacta tras validar ───────────────
+function fillRunbar(reporte) {
+  const liq = state.liqui.map((f) => f.name).join(', ');
+  const rec = state.recibos.map((f) => f.name).join(', ');
+  const txt = `${liq}  ·  ${rec}`;
+  const cli = clientName();
+  ui.rbCliente.textContent = cli || 'Sin nombre';
+  ui.rbCliente.title = cli || 'Sin nombre de cliente';
+  ui.rbFiles.textContent = txt;
+  ui.rbFiles.title = txt;
+  ui.rbCount.innerHTML = `<b>${reporte.resumen.total}</b> empleados`;
+}
+
+// ─────────────── Exportar diferencias a CSV ───────────────
+ui.btnExport.addEventListener('click', () => {
+  if (!D) return;
+  const conDif = D.empleados.filter((e) => e.hallazgos && e.hallazgos.length > 0);
+  if (!conDif.length) { alert('No hay diferencias para exportar: todos los recibos coinciden con la liquidación.'); return; }
+  const num = (n) => (n == null ? '' : Number(n).toFixed(2).replace('.', ','));
+  const q = (v) => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const cli = clientName();
+  const header = ['Cliente', 'Legajo', 'Nombre', 'Estado', 'Tipo', 'Código', 'Descripción', 'Liquidación', 'Recibo', 'Diferencia'];
+  const lines = [header.map(q).join(';')];
+  for (const e of conDif) {
+    for (const h of e.hallazgos) {
+      lines.push([
+        q(cli), q(e.legajo), q(e.nombre), q(e.resultado),
+        q(h.tipo.replace(/_/g, ' ')), q(h.codigo || ''), q(h.descripcion || h.mensaje || ''),
+        q(num(h.monto_liqui)), q(num(h.monto_recibo)), q(num(h.diferencia)),
+      ].join(';'));
+    }
+  }
+  const csv = '\uFEFF' + lines.join('\r\n'); // BOM para acentos en Excel
+  const stamp = (RUN_AT || new Date()).toISOString().slice(0, 10);
+  const slug = cli ? cli.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() : '';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `diferencias_${slug ? slug + '_' : ''}${stamp}.csv`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+});
