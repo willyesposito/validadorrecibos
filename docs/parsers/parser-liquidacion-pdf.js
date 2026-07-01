@@ -33,9 +33,11 @@ const _CONCEPTO_RE =
   /^(-?\d{3,6})\s*(.+?)\s+(?:\d{1,4},\d{2}\s+)?(-?(?:\d{1,3}\.)*\d{1,3},\d{2})\s*$/;
 
 // Línea de encabezado de empleado: 'Legajo: NNNN Empleado: <nombre> <ETIQUETA>: ...'
-// El nombre termina en la siguiente etiqueta de campo, que varía según el reporte Meta 4:
-// 'Categoría:' (Marval), 'Convenio:' (Copetro), etc. Se acota el nombre (lazy) hasta el
-// primer token que termine en ':' (una etiqueta de campo), en vez de exigir 'Categor'.
+// El nombre termina en la siguiente etiqueta de campo, que varía según el reporte Meta 4 y
+// puede caer en la misma línea o en la siguiente si el bloque se parte en dos líneas:
+// 'Categoría:' (Marval), 'Convenio:' (Copetro), 'Ingreso:' (Carrier Fueguina), etc.
+// Se acota el nombre (lazy) hasta el primer token que termine en ':' (una etiqueta de
+// campo), en vez de exigir una etiqueta puntual.
 const _LEGAJO_RE = /Legajo:\s*(\d+)\s+Empleado:\s*(.+?)\s+[^\s:]+:/;
 
 // Líneas de totales
