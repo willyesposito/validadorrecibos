@@ -32,8 +32,11 @@ const PROVISION_KEYWORDS = [
 const _CONCEPTO_RE =
   /^(-?\d{3,6})\s*(.+?)\s+(?:\d{1,4},\d{2}\s+)?(-?(?:\d{1,3}\.)*\d{1,3},\d{2})\s*$/;
 
-// Línea de encabezado de empleado
-const _LEGAJO_RE = /Legajo:\s*(\d+)\s+Empleado:\s*(.+?)\s+Categor/;
+// Línea de encabezado de empleado. El nombre termina en "Categor[ía]" cuando ese
+// campo cae en la misma línea (layout de una línea), o en "Ingreso:" cuando el
+// bloque Legajo/Empleado/Ingreso/Egreso ocupa su propia línea y Categoria queda en
+// la línea siguiente (layout de dos líneas, visto en exports Meta4 de otros clientes).
+const _LEGAJO_RE = /Legajo:\s*(\d+)\s+Empleado:\s*(.+?)\s+(?:Categor|Ingreso:)/;
 
 // Líneas de totales
 const _TOTAL_HABERES_RE = /Total Haberes:\s*([\d.,]+)/;
