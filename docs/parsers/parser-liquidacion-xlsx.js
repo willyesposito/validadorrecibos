@@ -37,6 +37,32 @@ const _KEYWORDS_UNIDAD = [
   'DIAS', 'PORC', 'UN_', 'U_DIAS', 'LIC_S_GOS', 'P_OBRA_SOC', 'SDOS_',
 ];
 
+// Aliases conocidos para la columna de legajo (en orden de prioridad).
+// Cubre variantes de Meta 4 y otros ERP. La búsqueda es exacta (trim, case-insensitive
+// se maneja al comparar en mayúsculas en indicePorAliases).
+const _LEGAJO_ALIASES = [
+  'EMPLEADO', 'ID_EMPLEADO', 'LEGAJO', 'NRO_LEGAJO', 'N_LEGAJO', 'LEG', 'NRO_LEG',
+];
+
+// Aliases conocidos para la columna de nombre/apellido.
+const _NOMBRE_ALIASES = [
+  'APELLIDO Y NOMBRE',
+  'APPELIDO Y NOMBRE',  // typo frecuente en reportes Meta 4
+  'APELLIDO_Y_NOMBRE', 'NOMBRE Y APELLIDO', 'NOMBRE',
+];
+
+// ── Landmarks de las AGRUPACIONES de totales (por posición de columna) ──
+// El Excel ordena los conceptos en bloques contiguos. Cada total es la suma de un
+// bloque, delimitado por códigos/encabezados ancla:
+//   • BRUTO:          desde el primer concepto cuyo código ∈ {1000,1001,1002,1003}
+//                     hasta el anterior al 5010.
+//   • DESCUENTOS:     desde el 5010 (inclusive) hasta el anterior al NETO.
+//   • CONTRIBUCIONES: desde el siguiente al NETO hasta el anterior a TARIFA.
+// Si un ancla no aparece, el bloque queda vacío y la UI deja elegir los conceptos a mano.
+const _BRUTO_START_CODES = ['1000', '1001', '1002', '1003'];
+const _DESC_START_CODE = '5010';
+const _CONTRIB_END_HEADER = 'TARIFA';
+
 // Convierte un string de dinero AR ('1.234.567,89') o US ('1,234,567.89') a número.
 // Replica EXACTAMENTE parse_money del Python. Devuelve null donde Python devuelve None.
 function parseMoney(s) {
@@ -83,8 +109,7 @@ function esColumnaUnidad(codigo, descripcion) {
   return _KEYWORDS_UNIDAD.some((kw) => up.indexOf(kw) !== -1);
 }
 
-// Localiza el índice (0-based) de una columna por header exacto (trim, sin distinguir
-// mayúsculas/minúsculas extra). Devuelve -1 si no aparece.
+// Localiza el índice (0-based) de una columna por header exacto (trim). Devuelve -1.
 function indicePorHeader(headers, nombre) {
   const objetivo = String(nombre).trim();
   for (let i = 0; i < headers.length; i++) {
@@ -95,51 +120,93 @@ function indicePorHeader(headers, nombre) {
   return -1;
 }
 
-// Parsea los encabezados y precomputa metadata de cada columna de concepto.
-// Devuelve { idxEmpleado, idxNombre, idxNeto, columnas: [{indice, codigo, descripcion,
-//            lado:'EMPLEADO'|'CONTRIB', esUnidad}] }.
-function parsearEncabezados(headers) {
-  const idxEmpleado = indicePorHeader(headers, 'EMPLEADO');
-  const idxNombre = indicePorHeader(headers, 'APELLIDO Y NOMBRE');
-  const idxNeto = indicePorHeader(headers, 'NETO');
+// Prueba una lista de aliases en orden de prioridad; devuelve el índice del primero que
+// aparezca (comparación case-insensitive), o -1 si ninguno está.
+function indicePorAliases(headers, aliases) {
+  for (const alias of aliases) {
+    const objetivo = alias.toUpperCase();
+    for (let i = 0; i < headers.length; i++) {
+      const h = headers[i];
+      if (h === null || h === undefined) continue;
+      if (String(h).trim().toUpperCase() === objetivo) return i;
+    }
+  }
+  return -1;
+}
 
+// Parsea los encabezados y precomputa metadata de cada columna de concepto.
+// opts.idxNeto: override del índice de la columna NETO (elegido en el picker de la UI);
+//   -1/undefined = detectar por header 'NETO'.
+// Devuelve { idxEmpleado, idxNombre, idxNeto, columnas, landmarks }.
+//   columnas: [{indice, codigo, descripcion, lado:'EMPLEADO'|'CONTRIB', esUnidad,
+//               grupo:'bruto'|'desc'|'contrib'|null, signo}]
+//   landmarks: { brutoStart, descStart, neto:boolean, contribEnd } — qué anclas se detectaron.
+function parsearEncabezados(headers, opts = {}) {
+  const idxEmpleado = indicePorAliases(headers, _LEGAJO_ALIASES);
+  const idxNombre = indicePorAliases(headers, _NOMBRE_ALIASES);
+  let idxNeto = indicePorHeader(headers, 'NETO');
+  if (opts.idxNeto != null && Number(opts.idxNeto) >= 0) idxNeto = Number(opts.idxNeto);
+
+  // 1) Columnas de concepto (patrón 'CODIGO - DESCRIPCION', con o sin espacios).
   const columnas = [];
   for (let i = 0; i < headers.length; i++) {
     const h = headers[i];
     if (h === null || h === undefined) continue;
     const txt = String(h).trim();
     if (!txt) continue;
-    // Solo columnas de concepto: patrón 'CODIGO-DESCRIPCION'. Saltear cabecera/metadata.
+    if (i === idxNeto) continue; // la columna NETO no es un concepto; se trata aparte
     const guion = txt.indexOf('-');
     if (guion <= 0) continue; // sin guión, o guión al inicio => no es concepto
-    // La columna NETO no es un concepto (es el neto); se trata aparte.
-    if (i === idxNeto) continue;
-
-    const codigo = txt.slice(0, guion);
-    const descripcion = txt.slice(guion + 1);
-    // Solo aceptar como concepto si el código es numérico (evita falsos positivos
-    // en metadata que pudiera contener un guión).
+    // trim() tolera tanto '1003-SUELDO' como '1003 - SUELDO' (variantes de Meta 4).
+    const codigo = txt.slice(0, guion).trim();
+    const descripcion = txt.slice(guion + 1).trim();
+    // Solo aceptar como concepto si el código es numérico (evita falsos positivos).
     if (!/^\d+$/.test(codigo)) continue;
-
-    // Lado según posición respecto a NETO. Si no se encontró NETO, todo es EMPLEADO.
-    let lado;
-    if (idxNeto === -1) {
-      lado = 'EMPLEADO';
-    } else {
-      lado = i < idxNeto ? 'EMPLEADO' : 'CONTRIB';
-    }
-
-    columnas.push({
-      indice: i,
-      codigo,
-      descripcion,
-      lado,
-      // Solo las del lado EMPLEADO pueden ser unidades; las CONTRIB siempre son montos.
-      esUnidad: lado === 'EMPLEADO' && esColumnaUnidad(codigo, descripcion),
-    });
+    columnas.push({ indice: i, codigo, descripcion, lado: null, esUnidad: false, grupo: null, signo: 1 });
   }
 
-  return { idxEmpleado, idxNombre, idxNeto, columnas };
+  // 2) Landmarks de agrupación (posición de columna en la hoja).
+  const idxTarifa = indicePorHeader(headers, _CONTRIB_END_HEADER); // -1 si no está
+  const contribEndIdx = idxTarifa >= 0 ? idxTarifa : Infinity;
+  let brutoStartIdx = -1, brutoStartCode = null;
+  for (const c of columnas) {
+    if (_BRUTO_START_CODES.indexOf(c.codigo) !== -1) { brutoStartIdx = c.indice; brutoStartCode = c.codigo; break; }
+  }
+  let descStartIdx = -1;
+  for (const c of columnas) {
+    if (c.codigo === _DESC_START_CODE) { descStartIdx = c.indice; break; }
+  }
+
+  // 3) Asignar lado / esUnidad / grupo a cada columna según su posición.
+  for (const c of columnas) {
+    const i = c.indice;
+    const enContrib = idxNeto >= 0 && i > idxNeto && i < contribEndIdx;
+    c.lado = enContrib ? 'CONTRIB' : 'EMPLEADO';
+    // Solo el lado EMPLEADO puede ser una unidad (días/porcentajes); CONTRIB siempre es monto.
+    c.esUnidad = c.lado === 'EMPLEADO' && esColumnaUnidad(c.codigo, c.descripcion);
+    if (enContrib) {
+      c.grupo = 'contrib';
+    } else if (idxNeto < 0 || i < idxNeto) {
+      if (descStartIdx >= 0 && i >= descStartIdx) {
+        c.grupo = 'desc';
+      } else if (brutoStartIdx >= 0 && i >= brutoStartIdx && (descStartIdx < 0 || i < descStartIdx)) {
+        c.grupo = 'bruto';
+      } else {
+        c.grupo = null;
+      }
+    } else {
+      c.grupo = null;
+    }
+  }
+
+  const landmarks = {
+    brutoStart: brutoStartCode,                       // código que ancló el inicio de bruto, o null
+    descStart: descStartIdx >= 0 ? _DESC_START_CODE : null,
+    neto: idxNeto >= 0,
+    contribEnd: idxTarifa >= 0 ? _CONTRIB_END_HEADER : null,
+  };
+
+  return { idxEmpleado, idxNombre, idxNeto, columnas, landmarks };
 }
 
 // Fusiona conceptos por código sumando montos (mantiene la descripción del primero).
@@ -169,15 +236,104 @@ function sumarOpcional(acumulado, valor) {
   return Math.round(((acumulado || 0) + valor) * 100) / 100;
 }
 
+/**
+ * Detecta qué columnas del Excel corresponden al legajo y al nombre, sin parsear datos.
+ * Útil para que la UI muestre un picker de columnas cuando la detección automática no
+ * reconoce los headers del archivo.
+ *
+ * @param {Array<Array>} rows — matriz de la hoja (sheet_to_json header:1), solo se usa rows[0]
+ * @returns {{ headers: {idx:number, name:string}[], legajoIdx, nombreIdx, netoIdx }}
+ *   índices = -1 si no se detectó la columna.
+ */
+export function detectXlsxColumns(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { headers: [], legajoIdx: -1, nombreIdx: -1, netoIdx: -1 };
+  }
+  const raw = rows[0] || [];
+  const headers = raw
+    .map((h, i) => ({ idx: i, name: h != null ? String(h).trim() : '' }))
+    .filter((h) => h.name !== '');
+  return {
+    headers,
+    legajoIdx: indicePorAliases(raw, _LEGAJO_ALIASES),
+    nombreIdx: indicePorAliases(raw, _NOMBRE_ALIASES),
+    netoIdx: indicePorHeader(raw, 'NETO'),
+  };
+}
+
+/**
+ * Detecta las AGRUPACIONES de totales (bruto / descuentos / contribuciones) sin parsear
+ * datos: devuelve los conceptos asignados a cada total por las reglas de posición, para que
+ * la UI los muestre y permita editarlos (sumar / restar / eliminar / agregar). Excluye las
+ * columnas de unidad (días/porcentajes), que no son montos.
+ *
+ * @param {Array<Array>} rows — matriz de la hoja (sheet_to_json header:1)
+ * @param {{ idxNeto?: number }} opts — override del índice de NETO (del picker de la UI)
+ * @returns {{
+ *   bruto: {codigo,descripcion,signo}[], desc: {...}[], contrib: {...}[],
+ *   todos: {codigo,descripcion,grupo}[],
+ *   landmarks: { brutoStart, descStart, neto:boolean, contribEnd }
+ * }}
+ */
+export function detectXlsxGroups(rows, opts = {}) {
+  const vacio = { bruto: [], desc: [], contrib: [], todos: [],
+    landmarks: { brutoStart: null, descStart: null, neto: false, contribEnd: null } };
+  if (!Array.isArray(rows) || rows.length === 0) return vacio;
+  const meta = parsearEncabezados(rows[0] || [], { idxNeto: opts.idxNeto });
+  // Las agrupaciones por defecto excluyen las columnas de unidad (días/porcentajes).
+  const mk = (c) => ({ codigo: c.codigo, descripcion: c.descripcion, signo: 1 });
+  const enGrupo = (g) => meta.columnas.filter((c) => c.grupo === g && !c.esUnidad).map(mk);
+  return {
+    bruto: enGrupo('bruto'),
+    desc: enGrupo('desc'),
+    contrib: enGrupo('contrib'),
+    // 'todos' incluye TODAS las columnas de concepto (incluso las marcadas como unidad), para
+    // que la UI pueda agregar una columna mal clasificada (ej. 4453 DIAS_FERIADOS, que es monto).
+    todos: meta.columnas.map((c) => ({
+      codigo: c.codigo, descripcion: c.descripcion, grupo: c.esUnidad ? null : c.grupo, esUnidad: c.esUnidad,
+    })),
+    landmarks: meta.landmarks,
+  };
+}
+
+// Construye un mapa de override de agrupaciones a partir de opts.grupos.
+// opts.grupos = { bruto: {codigo:signo,...}, desc:{...}, contrib:{...} } (lo arma la UI).
+// Devuelve { [codigo]: {grupo, signo} } o null si no hay override.
+function construirOverrideGrupos(grupos) {
+  if (!grupos) return null;
+  const map = {};
+  for (const grupo of ['bruto', 'desc', 'contrib']) {
+    const m = grupos[grupo] || {};
+    for (const codigo of Object.keys(m)) {
+      const signo = Number(m[codigo]);
+      map[codigo] = { grupo, signo: signo === -1 ? -1 : 1 };
+    }
+  }
+  return map;
+}
+
 // Parser principal.
 // rows: Array<Array<any>> — la hoja como matriz fila-por-fila (sheet_to_json header:1).
+// opts.colLegajoIdx / opts.colNombreIdx / opts.colNetoIdx: override del índice de columna
+//   (elegido en el picker de la UI); -1/undefined = detección automática.
+// opts.grupos: override de las agrupaciones de totales (ver construirOverrideGrupos); si se
+//   provee, define qué conceptos y con qué signo suman a bruto/desc/contrib. Sin override,
+//   se usan las agrupaciones automáticas por posición (landmarks).
 // Devuelve { [legajo]: LiquidacionEmpleado } consolidado por legajo.
-export function parseLiquidacionXlsx(rows) {
+export function parseLiquidacionXlsx(rows, opts = {}) {
   const resultados = {};
   if (!Array.isArray(rows) || rows.length === 0) return resultados;
 
   const headers = rows[0] || [];
-  const meta = parsearEncabezados(headers);
+  const meta = parsearEncabezados(headers, { idxNeto: opts.colNetoIdx });
+  // Overrides del picker de columnas de la UI (el usuario eligió manualmente).
+  if (opts.colLegajoIdx != null && Number(opts.colLegajoIdx) >= 0) {
+    meta.idxEmpleado = Number(opts.colLegajoIdx);
+  }
+  if (opts.colNombreIdx != null && Number(opts.colNombreIdx) >= 0) {
+    meta.idxNombre = Number(opts.colNombreIdx);
+  }
+  const overrideGrupos = construirOverrideGrupos(opts.grupos);
 
   // Acumulador por legajo: junta filas (cada fila = un bloque por fecha de imputación).
   // estado[legajo] = { legajo, nombre, neto, total_contrib, conceptos, n_bloques }
@@ -201,24 +357,33 @@ export function parseLiquidacionXlsx(rows) {
           : fila[meta.idxNombre]).trim()
       : '';
 
-    // Conceptos de la fila.
+    // Conceptos de la fila + totales por agrupación.
     const conceptosFila = [];
-    let totalContribFila = null;
+    let brutoFila = null, descFila = null, contribFila = null;
     for (const col of meta.columnas) {
-      if (col.esUnidad) continue; // excluir unidades/días/porcentajes
+      // Grupo + signo efectivos: override de la UI si existe, si no la asignación automática.
+      let grupo = col.grupo, signo = col.signo || 1;
+      const o = overrideGrupos ? overrideGrupos[col.codigo] : undefined;
+      if (overrideGrupos) {
+        grupo = o ? o.grupo : null;   // con override, un código no listado no suma a ningún total
+        signo = o ? o.signo : 1;
+      }
+      // Las columnas de unidad (días/porcentajes) se ignoran por defecto. Solo cuentan si el
+      // usuario las asignó explícitamente a un grupo (override): en ese caso declara que esa
+      // columna es un monto (ej. 4453 DIAS_FERIADOS, que la heurística confunde con unidad).
+      const asignadaAGrupo = !!(o && o.grupo);
+      if (col.esUnidad && !asignadaAGrupo) continue;
+
       const valor = valorNumerico(fila[col.indice]);
       if (valor === null || valor === 0) continue; // 0/null/'' = no aplica
       const monto = Math.abs(valor);
-      const columna = col.lado === 'CONTRIB' ? 'CONTRIB' : 'REM';
-      conceptosFila.push({
-        codigo: col.codigo,
-        descripcion: col.descripcion,
-        monto,
-        columna,
-      });
-      if (col.lado === 'CONTRIB') {
-        totalContribFila = sumarOpcional(totalContribFila, monto);
-      }
+      // Los conceptos de contribución se validan solo por total (el validador los saltea
+      // línea por línea vía columna==='CONTRIB'). El resto se chequea concepto a concepto.
+      const columna = grupo === 'contrib' ? 'CONTRIB' : 'REM';
+      conceptosFila.push({ codigo: col.codigo, descripcion: col.descripcion, monto, columna });
+      if (grupo === 'bruto')   brutoFila   = sumarOpcional(brutoFila,   signo * monto);
+      if (grupo === 'desc')    descFila    = sumarOpcional(descFila,    signo * monto);
+      if (grupo === 'contrib') contribFila = sumarOpcional(contribFila, signo * monto);
     }
 
     // Neto de la fila.
@@ -229,7 +394,9 @@ export function parseLiquidacionXlsx(rows) {
       estado[legajo] = {
         legajo,
         nombre,
+        bruto: null,
         neto: null,
+        total_desc: null,
         total_contrib: null,
         conceptos: [],
         n_bloques: 0,
@@ -238,8 +405,10 @@ export function parseLiquidacionXlsx(rows) {
     }
     const e = estado[legajo];
     if (!e.nombre && nombre) e.nombre = nombre;
+    e.bruto = sumarOpcional(e.bruto, brutoFila);
     e.neto = sumarOpcional(e.neto, netoFila);
-    e.total_contrib = sumarOpcional(e.total_contrib, totalContribFila);
+    e.total_desc = sumarOpcional(e.total_desc, descFila);
+    e.total_contrib = sumarOpcional(e.total_contrib, contribFila);
     for (const c of conceptosFila) e.conceptos.push(c);
     e.n_bloques += 1;
   }
@@ -250,12 +419,13 @@ export function parseLiquidacionXlsx(rows) {
     resultados[legajo] = {
       legajo: e.legajo,
       nombre: e.nombre,
-      // No hay 'Total Haberes' explícito ni total de descuentos en el Excel:
-      // no se inventan; el validador maneja null.
-      bruto: null,
+      // bruto / total_desc / total_contrib se calculan sumando las agrupaciones de
+      // conceptos (ver parsearEncabezados → landmarks). Si una agrupación quedó vacía
+      // (ancla no detectada y sin override del usuario), su total queda null.
+      bruto: e.bruto,
       neto: e.neto,
       total_rem: null,
-      total_desc: null,
+      total_desc: e.total_desc,
       total_no_rem: null,
       total_contrib: e.total_contrib,
       conceptos: fusionarConceptos(e.conceptos),

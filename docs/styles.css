@@ -227,6 +227,113 @@ body {
 
 .actions { display: flex; align-items: center; gap: 16px; margin-top: 22px; flex-wrap: wrap; }
 
+/* ─────────────── Panel de columnas Excel ─────────────── */
+.xlsx-cfg {
+  margin-top: 14px;
+  padding: 13px 16px 14px;
+  border: 1px solid var(--celeste-border);
+  border-radius: var(--r-sm);
+  background: var(--celeste-dim);
+}
+.xlsx-cfg-hd {
+  display: flex; align-items: center; gap: 7px;
+  margin-bottom: 11px;
+}
+.xlsx-cfg-ico { color: var(--celeste-dark); display: flex; flex: none; }
+.xlsx-cfg-title { font-weight: 700; font-size: 0.85rem; color: var(--navy); }
+.xlsx-cfg-hint { font-size: 0.78rem; color: var(--t2); margin-left: 4px; }
+.xlsx-cfg-rows { display: flex; gap: 16px; flex-wrap: wrap; }
+.xlsx-cfg-row { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 190px; }
+.xlsx-cfg-lbl {
+  font-size: 0.72rem; font-weight: 700; color: var(--t2);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.xlsx-cfg-sel-wrap { display: flex; align-items: center; gap: 8px; }
+.xlsx-cfg-sel {
+  flex: 1; min-width: 0;
+  font-family: var(--font); font-size: 0.84rem;
+  padding: 5px 8px; border-radius: var(--r-sm);
+  border: 1px solid var(--celeste-border);
+  background: var(--white); color: var(--t1);
+  cursor: pointer;
+  transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+}
+.xlsx-cfg-sel:focus {
+  outline: none; border-color: var(--celeste);
+  box-shadow: 0 0 0 3px rgba(0,172,212,0.18);
+}
+.xlsx-cfg-badge {
+  font-size: 0.71rem; font-weight: 700;
+  padding: 2px 8px; border-radius: var(--r-full);
+  white-space: nowrap; flex: none;
+  border: 1px solid transparent;
+}
+.xlsx-cfg-badge.ok   { background: var(--ok-bg);      color: var(--ok-tx);      border-color: var(--ok-bd); }
+.xlsx-cfg-badge.warn { background: var(--warn-bg);     color: var(--warn-tx);    border-color: var(--warn-bd); }
+.xlsx-cfg-badge.mod  { background: var(--celeste-dim); color: var(--celeste-dark); border-color: var(--celeste-border); }
+
+/* ─────────────── Panel de agrupaciones de totales ─────────────── */
+.xlsx-grupos {
+  margin-top: 12px;
+  padding: 13px 16px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--white);
+}
+.xg-groups { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 4px; }
+@media (max-width: 860px) { .xg-groups { grid-template-columns: 1fr; } }
+.xg-group {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 11px 12px 12px;
+  background: var(--paper);
+  display: flex; flex-direction: column; gap: 9px;
+}
+.xg-g-hd { display: flex; align-items: baseline; gap: 7px; justify-content: space-between; }
+.xg-g-title { font-weight: 700; font-size: 0.82rem; color: var(--navy); letter-spacing: -0.01em; }
+.xg-g-count { font-size: 0.72rem; color: var(--t3); font-variant-numeric: tabular-nums; }
+.xg-warn {
+  font-size: 0.74rem; color: var(--warn-tx);
+  background: var(--warn-bg); border: 1px solid var(--warn-bd);
+  border-radius: var(--r-sm); padding: 5px 8px; line-height: 1.4;
+}
+.xg-chips { display: flex; flex-direction: column; gap: 5px; }
+.xg-chip {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 5px 3px 4px; border-radius: var(--r-sm);
+  border: 1px solid var(--line); background: var(--white);
+  font-size: 0.78rem;
+}
+.xg-chip.neg { border-color: var(--error-bd); background: var(--error-bg); }
+.xg-sign {
+  flex: none; width: 20px; height: 20px; border-radius: 5px;
+  border: 1px solid var(--celeste-border); background: var(--celeste-dim);
+  color: var(--celeste-dark); font-weight: 800; font-size: 0.9rem; line-height: 1;
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--t) var(--ease);
+}
+.xg-chip.neg .xg-sign { border-color: var(--error-bd); background: rgba(232,85,24,0.18); color: var(--error-tx); }
+.xg-sign:focus-visible { outline: 2px solid var(--celeste); outline-offset: 1px; }
+.xg-code { font-weight: 700; color: var(--t1); font-variant-numeric: tabular-nums; flex: none; }
+.xg-desc { color: var(--t2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.xg-unit { font-size: 0.66rem; color: var(--warn-tx); font-weight: 700; flex: none; }
+.xg-rm {
+  flex: none; width: 19px; height: 19px; border-radius: 5px;
+  border: 1px solid var(--line); background: transparent; color: var(--t3);
+  cursor: pointer; font-size: 0.95rem; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: color var(--t) var(--ease), border-color var(--t) var(--ease);
+}
+.xg-rm:hover { color: var(--error-tx); border-color: var(--error-bd); }
+.xg-empty { font-size: 0.74rem; color: var(--t3); font-style: italic; padding: 2px 0; }
+.xg-add {
+  font-family: var(--font); font-size: 0.76rem;
+  padding: 4px 7px; border-radius: var(--r-sm);
+  border: 1px dashed var(--celeste-border); background: var(--white); color: var(--celeste-dark);
+  cursor: pointer; width: 100%;
+}
+.xg-add:focus { outline: none; border-color: var(--celeste); box-shadow: 0 0 0 3px rgba(0,172,212,0.18); }
+
 /* ─────────────── Barra compacta (post-validación) ─────────────── */
 #runbar { display: none; }
 #sec-carga.collapsed .block-head,
